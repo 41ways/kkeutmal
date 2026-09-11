@@ -7,7 +7,8 @@
   dict-ko-data.yaml hunspell-dict-ko 의 낱말 데이터 (spellcheck-ko, CC BY-SA 4.0)
 
 결과
-  dict/words.txt       서버가 쓰는 낱말 목록. 한 줄에 하나, 흔한 낱말(hunspell 명사)은 앞에 '*'.
+  dict/words.txt       서버가 쓰는 낱말 목록. 한 줄에 하나, 앞에 붙은 표시:
+                       '*' 흔한 낱말(hunspell 명사) · '~' 외래어가 든 말('외래어 금지' 방에서 막는다)
   public/dict/<hex>.json  첫 글자별 뜻풀이 {낱말: 뜻 | [뜻, 뜻, …]}. 화면이 낱말을 띄울 때 받아 간다.
                        소리가 같은 낱말(가격01 加擊 · 가격02 價格)은 넷까지 담는다. 사전 번호는 쓰임 순서가
                        아니라서(사과01 이 '참외') 분야 표시가 없는 일반 뜻을 앞에 세운다.
@@ -35,15 +36,30 @@ def tidy(d, limit):
         d = cut[:dot] if dot > 20 else cut.rstrip() + '…'
     return d
 
+def is_foreign(wtype, langs):
+    """외래어이거나, 혼종어 가운데 한자·고유어가 아닌 원어(영어 · '안 밝힘' 음역 등)가 섞인 말"""
+    if wtype == '외래어':
+        return True
+    return wtype == '혼종어' and any(l not in ('한자', '고유어', '') for l in langs.split(','))
+
 defs = {}
+foreign = {}       # 낱말 → 소리가 같은 낱말이 모두 외래어인가
+foreign_any = {}   # 품사를 가리지 않고 — '럭스'처럼 사전엔 의존 명사로 있고 hunspell 에선 명사인 말을 위해
 for line in open(tsv, encoding='utf-8'):
-    w, pos, unit, wtype, types, cat, d = line.rstrip('\n').split('\t')
+    f = line.rstrip('\n').split('\t')
+    w, pos, unit, wtype, types, cat, d = f[:7]
+    langs = f[7] if len(f) > 7 else ''
+    if unit == '단어':
+        k = re.sub(r'[\d\-^]', '', w)
+        foreign_any[k] = foreign_any.get(k, True) and is_foreign(wtype, langs)
     if unit != '단어' or pos not in ('명사', '대명사', '수사'):
         continue
     w = re.sub(r'[\d\-^]', '', w)
     if not HANGUL.fullmatch(w) or NONSTD.search(d):
         continue
     defs.setdefault(w, []).append((1 if cat else 0, len(defs[w]), d))
+    # '모라'처럼 소리가 같은 고유어가 하나라도 있으면 그 뜻으로 친 것일 수 있어 막지 않는다
+    foreign[w] = foreign.get(w, True) and is_foreign(wtype, langs)
 
 for w, got in defs.items():
     out = []
@@ -65,11 +81,25 @@ for line in open(yaml, encoding='utf-8'):
     if m and pos == '명사' and HANGUL.fullmatch(m.group(1).strip()):
         common.add(m.group(1).strip())
 
+# hunspell 에만 있는 낱말은 원어 정보가 없다. 킬로그램 · 팬미팅 · 요격미사일 같은 합성어를 가려낸다:
+#  앞이나 뒤가 사전의 외래어(두 글자 이상)이거나, 외래어에만 나오는 글자(샤 · 럼 …)가 들어 있으면 외래어로 친다.
+loan = {w for w, v in foreign_any.items() if v and len(w) >= 2 and HANGUL.fullmatch(w)}
+native_syl = {c for w, v in foreign_any.items() if not v for c in w}
+loan_syl = {c for w in loan for c in w} - native_syl
+def guess_foreign(w):
+    if w in foreign_any:
+        return foreign_any[w]
+    if any(c in loan_syl for c in w):
+        return True
+    return any(w[:k] in loan or w[-k:] in loan for k in range(2, len(w)))
+for w in common - set(defs):
+    foreign[w] = guess_foreign(w)
+
 words = sorted(set(defs) | common)
 os.makedirs(os.path.join(ROOT, 'dict'), exist_ok=True)
 with open(os.path.join(ROOT, 'dict', 'words.txt'), 'w', encoding='utf-8') as f:
     for w in words:
-        f.write(('*' if w in common else '') + w + '\n')
+        f.write(('*' if w in common else '') + ('~' if foreign.get(w) else '') + w + '\n')
 
 shard_dir = os.path.join(ROOT, 'public', 'dict')
 shutil.rmtree(shard_dir, ignore_errors=True)
@@ -83,5 +113,5 @@ for ch, m in shards.items():
         json.dump(m, f, ensure_ascii=False, separators=(',', ':'), sort_keys=True)
 
 size = sum(os.path.getsize(os.path.join(shard_dir, x)) for x in os.listdir(shard_dir))
-print(f'낱말 {len(words):,}개 (흔한 낱말 {len(common):,}) · 뜻풀이 {sum(map(len, shards.values())):,}개 '
+print(f'낱말 {len(words):,}개 (흔한 낱말 {len(common):,} · 외래어 {sum(1 for w in words if foreign.get(w)):,}) · 뜻풀이 {sum(map(len, shards.values())):,}개 '
       f'· 조각 {len(shards):,}개 {size / 1e6:.1f}MB')

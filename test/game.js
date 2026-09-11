@@ -150,7 +150,7 @@ check('시간이 다 가면 감점하고 다음 라운드는 진 사람부터', 
   advance(500);
   const loser = room.g.turnId;
   const before = room.players.find(p => p.id === loser).score;
-  advance(13_000);
+  advance(11_000);
   const f = last(a, m => m.t === 'ev' && m.kind === 'fail');
   assert.strictEqual(f.by, loser);
   assert.strictEqual(room.players.find(p => p.id === loser).score, before - 50);
@@ -222,6 +222,75 @@ check('한방 금지 방에서는 이을 말이 없는 낱말을 받지 않는�
   assert.strictEqual(game._t.check(r, killer), 'hanbang');
   r.cfg.manner = false;
   assert.strictEqual(game._t.check(r, killer), null);
+  game.handle(h, { t: 'leave' });
+});
+
+check('외래어 금지 방에서는 버스 · 버스표를 받지 않고, 봇도 외래어를 안 쓴다', () => {
+  const h = sock();
+  game.handle(h, { t: 'create', name: '토박이', bots: 3 });
+  const r = game.rooms.get(last(h, m => m.t === 'welcome').code);
+  game.handle(h, { t: 'cfg', noForeign: true, botDiff: 'hard', rounds: 3 });
+  r.players.find(p => !p.bot).connected = false;
+  game.handle(h, { t: 'start' });
+  advance(2000);
+  r.g.starts = ['버'];
+  assert.strictEqual(game._t.check(r, '버스'), 'foreign');
+  assert.strictEqual(game._t.check(r, '버스표'), 'foreign');
+  r.g.starts = ['밥'];
+  assert.strictEqual(game._t.check(r, '밥상'), null);
+  advance(60_000 * 4);
+  const oks = evs(h, 'ok');
+  assert.ok(oks.length > 3, '낱말이 너무 적다');
+  const bad = oks.filter(m => game._t.FOREIGN.has(m.word));
+  assert.deepStrictEqual(bad.map(m => m.word), []);
+  console.log(`      외래어 금지 어려움 봇: ${oks.slice(0, 8).map(m => m.word).join(' → ')}`);
+  game.handle(h, { t: 'leave' });
+});
+
+check('시간제한 없음 — 시계가 안 가고, 포기하면 −50 · 다음 라운드', () => {
+  const x = sock(), y = sock();
+  game.handle(x, { t: 'create', name: 'x' });
+  const c = last(x, m => m.t === 'welcome').code;
+  game.handle(y, { t: 'join', code: c, name: 'y' });
+  const r = game.rooms.get(c);
+  game.handle(x, { t: 'cfg', roundTime: 0, rounds: 3 });
+  assert.strictEqual(r.cfg.roundTime, 0);
+  game.handle(x, { t: 'start' });
+  advance(2000);
+  const cur = r.g.turnId;
+  assert.strictEqual(r.g.turnLimit, 0);
+  advance(5 * 60_000);                                   // 5분을 기다려도
+  assert.strictEqual(r.g.stage, 'turn');
+  assert.strictEqual(r.g.turnId, cur);
+  assert.strictEqual(evs(x, 'fail').length, 0);
+  // 차례가 아닌 사람의 포기는 무시
+  game.handle(cur === 1 ? y : x, { t: 'giveup' });
+  assert.strictEqual(evs(x, 'fail').length, 0);
+  game.handle(cur === 1 ? x : y, { t: 'giveup' });
+  const f = last(x, m => m.t === 'ev' && m.kind === 'fail');
+  assert.strictEqual(f.why, 'giveup');
+  assert.strictEqual(r.players.find(p => p.id === cur).score, -50);
+  advance(2700);
+  assert.strictEqual(r.g.round, 2);
+  // 차례인 사람이 끊기면 잠깐 뒤 넘어간다
+  advance(2000);
+  const who = r.g.turnId;
+  game.disconnect(who === 1 ? x : y);
+  advance(9000);
+  assert.strictEqual(last(x, m => m.t === 'ev' && m.kind === 'fail').why === 'dc' || last(y, m => m.t === 'ev' && m.kind === 'fail').why === 'dc', true);
+  game.handle(x, { t: 'leave' }); game.handle(y, { t: 'leave' });
+});
+
+check('시간제한 없는 봇 판도 끝난다 (막히면 봇이 포기)', () => {
+  const h = sock();
+  game.handle(h, { t: 'create', name: '관전', bots: 3 });
+  const r = game.rooms.get(last(h, m => m.t === 'welcome').code);
+  game.handle(h, { t: 'cfg', roundTime: 0, rounds: 3, botDiff: 'hard' });
+  r.players.find(p => !p.bot).connected = false;
+  game.handle(h, { t: 'start' });
+  advance(60 * 60_000);
+  assert.strictEqual(r.phase, 'lobby', '판이 안 끝났다');
+  assert.ok(evs(h, 'fail').every(m => m.why === 'giveup' || m.why === 'time'));
   game.handle(h, { t: 'leave' });
 });
 

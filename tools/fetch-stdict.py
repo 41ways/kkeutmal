@@ -4,7 +4,7 @@
   python3 tools/fetch-stdict.py <작업 폴더>
 
 파일 87개(각 5MB 안팎)를 차례로 받아 읽고 바로 지운다. 결과는 <작업 폴더>/stdict.tsv:
-  표제어 \t 품사 \t 단어|구 \t 고유어·한자어… \t 뜻 갈래(일반어,방언…) \t 분야 \t 첫 뜻풀이
+  표제어 \t 품사 \t 단어|구 \t 고유어·한자어… \t 뜻 갈래(일반어,방언…) \t 분야 \t 첫 뜻풀이 \t 원어 갈래(영어,한자…)
 이미 읽은 파일은 건너뛰므로 끊겨도 다시 돌리면 이어 간다.
 """
 import os, re, subprocess, sys, xml.etree.ElementTree as ET
@@ -37,6 +37,10 @@ with open(out_path, 'a', encoding='utf-8') as out:
             word = text(wi, 'word')
             unit = text(wi, 'word_unit')
             wtype = text(wi, 'word_type')
+            langs = []
+            for lt in wi.iter('language_type'):
+                if lt.text and lt.text.strip() not in langs:
+                    langs.append(lt.text.strip())
             for pi in wi.findall('pos_info'):
                 pos = text(pi, 'pos')
                 types, cats, first = [], [], ''
@@ -50,7 +54,7 @@ with open(out_path, 'a', encoding='utf-8') as out:
                     if not first:
                         first = text(si, 'definition')
                 first = re.sub(r'\s+', ' ', first)
-                out.write('\t'.join([word, pos, unit, wtype, ','.join(types), ','.join(cats), first]) + '\n')
+                out.write('\t'.join([word, pos, unit, wtype, ','.join(types), ','.join(cats), first, ','.join(langs)]) + '\n')
                 n += 1
         os.remove(tmp)
         with open(done_path, 'a') as d:

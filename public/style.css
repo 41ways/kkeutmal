@@ -344,3 +344,5 @@ input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-so
   .stamp { font-size: 20px; }
 }
 .entry input::placeholder { font: 500 16px var(--sans); color: var(--ink3); }
+.entry .giveup { flex: none; color: var(--bad); border: 1.5px solid rgba(192, 57, 43, .35); margin-left: 4px; }
+.entry .giveup:hover { background: #fff1ee; color: var(--bad); }

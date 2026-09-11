@@ -16,8 +16,10 @@ const el = {
   roundFill: $('#roundFill'), roundSec: $('#roundSec'), turnFill: $('#turnFill'), turnSec: $('#turnSec'),
   board: $('#board'), sheet: $('#sheet'), by: $('#by'), def: $('#def'), attempt: $('#attempt'), stamp: $('#stamp'),
   chain: $('#chain'), players: $('#players'),
-  entryForm: $('#entryForm'), entry: $('#entry'), entryTag: $('#entryTag'),
+  timers: $('.timers'), roundBar: $('.tbar.round'), turnBar: $('.tbar.turn'),
+  entryForm: $('#entryForm'), entry: $('#entry'), entryTag: $('#entryTag'), btnGiveup: $('#btnGiveup'),
   dlgResult: $('#dlgResult'), ranking: $('#ranking'), resultNote: $('#resultNote'),
+  btnAgain: $('#btnAgain'), btnResultClose: $('#btnResultClose'),
   toast: $('#toast'),
 };
 
@@ -38,7 +40,11 @@ const WHY = {
   nodict: '사전에 없는 말',
   used: '이미 나온 말',
   hanbang: '한방 단어 금지',
+  foreign: '외래어 금지',
 };
+const FAIL_STAMP = { round: '라운드 끝', time: '시간 초과', giveup: '포기', dc: '연결 끊김' };
+const FAIL_LINE = { round: '라운드 시간 초과', time: '차례 시간 초과', giveup: '포기', dc: '연결이 끊겨 차례를 넘김' };
+const timedRoom = () => S && S.cfg.roundTime > 0;
 
 let toastT = null;
 function toast(msg, ms = 2600) {
@@ -350,7 +356,7 @@ function renderGame(prev) {
   // 제시어
   el.roundWord.innerHTML = [...g.roundWord].map((c, i) =>
     `<span class="${i + 1 < g.round ? 'done' : i + 1 === g.round ? 'now' : 'next'}">${esc(c)}</span>`).join('');
-  el.roundNo.textContent = `${g.round} / ${g.rounds} 라운드`;
+  el.roundNo.textContent = `${g.round} / ${g.rounds} 라운드` + (timedRoom() ? '' : ' · 시간제한 없음');
   el.mission.hidden = !g.mission;
   if (g.mission) {
     if (!prev || !prev.g || prev.g.mission !== g.mission) { el.mission.classList.remove('pop'); void el.mission.offsetWidth; el.mission.classList.add('pop'); }
@@ -448,6 +454,7 @@ function popPts(id, pts) {
 }
 
 let defReq = 0;
+let restored = null;          // 틀려서 입력칸에 되돌려 둔 낱말
 function onEvent(m) {
   switch (m.kind) {
     case 'round':
@@ -478,7 +485,7 @@ function onEvent(m) {
       if (m.by === me) {
         beep('bad');
         // 친 말을 되돌려 고쳐 칠 수 있게
-        if (!el.entry.value) { el.entry.value = m.word; el.entry.select(); }
+        if (!el.entry.value) { el.entry.value = restored = m.word; el.entry.select(); }
         el.entryForm.classList.remove('shake'); void el.entryForm.offsetWidth; el.entryForm.classList.add('shake');
       }
       break;
@@ -486,14 +493,17 @@ function onEvent(m) {
 
     case 'fail': {
       beep('fail');
+      // 내 차례가 끝났다 — 되돌려 둔 틀린 낱말이 그대로면 치운다 (Enter 한 번에 채팅으로 나가지 않게)
+      if (m.by === me && restored && el.entry.value === restored) el.entry.value = '';
+      restored = null;
       const who = nameById(m.by);
-      showStamp(m.why === 'round' ? '라운드 끝' : '시간 초과', 'fail', 2400);
+      showStamp(FAIL_STAMP[m.why] || '시간 초과', 'fail', 2400);
       el.by.innerHTML = `<b>${esc(who)}</b> <span class="pts">−${m.penalty}</span>`;
       el.def.innerHTML = m.hint ? `이런 말이 있었음 → <b>${esc(m.hint)}</b>` : '이을 말이 사전에 없었음';
       el.attempt.textContent = '';
       requestAnimationFrame(() => popPts(m.by, -m.penalty));
       drawNext();
-      addSys(`${esc(who)} ${m.why === 'round' ? '라운드 시간' : '차례 시간'} 초과 −${m.penalty}`, 'bad', true);
+      addSys(`${esc(who)} ${FAIL_LINE[m.why] || '시간 초과'} −${m.penalty}`, 'bad', true);
       break;
     }
 
@@ -518,7 +528,12 @@ function showResult(ranking) {
       <span class="sc">${r.score}</span></li>`).join('');
   const mine = ranking.findIndex(r => r.id === me);
   el.resultNote.textContent = mine === 0 ? '1등!' : mine > 0 ? `${mine + 1}등` : '';
+  // 방장은 같은 설정으로 바로 한 판 더 (Enter 로도)
+  el.btnAgain.hidden = !isHost();
+  el.btnResultClose.textContent = isHost() ? '대기실로' : '확인';
+  el.dlgResult.returnValue = '';               // Esc 로 닫으면 지난번 값이 남아 '한 판 더'가 눌린 셈이 되지 않게
   if (!el.dlgResult.open) el.dlgResult.showModal();
+  (isHost() ? el.btnAgain : el.btnResultClose).focus();
 }
 
 /* ───────────── 시계 ───────────── */
@@ -528,7 +543,13 @@ function frame() {
   if (!S || !S.g || el.scGame.hidden) return;
   const g = S.g;
   const now = Date.now() + clockOffset;
-  const total = S.cfg.roundTime * 1000;
+  const timed = timedRoom();
+  const total = S.cfg.roundTime * 1000 || 1;
+  // 시간제한 없는 방: 라운드 막대는 없고, 차례 막대는 이을 말이 없거나 연결이 끊긴 차례에만(자동으로 넘어가기까지) 뜬다
+  const turnClock = g.stage === 'turn' ? g.turnLimit > 0 : timed;
+  el.roundBar.hidden = !timed;
+  el.turnBar.hidden = !turnClock;
+  el.timers.hidden = !timed && !turnClock;
   let roundLeft = g.roundLeft, turnLeft = g.turnLimit, turnTotal = g.turnLimit || 1;
   if (g.stage === 'turn') {
     const used = now - g.turnStart;
@@ -541,7 +562,7 @@ function frame() {
   el.roundSec.textContent = (roundLeft / 1000).toFixed(0) + '초';
   el.turnFill.style.transform = `scaleX(${g.stage === 'turn' ? turnLeft / turnTotal : g.stage === 'fail' ? 0 : 1})`;
   el.turnSec.textContent = g.stage === 'turn' ? (turnLeft / 1000).toFixed(1) + '초' : '';
-  const hurry = g.stage === 'turn' && turnLeft < 3000;
+  const hurry = turnClock && g.stage === 'turn' && turnLeft < 3000;
   el.turnFill.parentNode.parentNode.classList.toggle('hurry', hurry);
   if (hurry && g.turnId === me) {
     const sec = Math.ceil(turnLeft / 1000);
@@ -599,6 +620,7 @@ function syncEntry() {
   const playing = g && p && p.inGame;
   const myTurn = playing && (g.stage === 'turn' || g.stage === 'gap') && g.turnId === me;
   el.entryForm.classList.toggle('myturn', !!myTurn);
+  el.btnGiveup.hidden = !(myTurn && g.stage === 'turn');
   el.entryTag.textContent = myTurn ? '낱말' : '채팅';
   el.entry.placeholder = myTurn
     ? `${startsLabel(g.starts)} 시작하는 낱말${S.cfg.mode === 'kkt' ? ' (세 글자)' : ''}`
@@ -622,7 +644,11 @@ function addChat(name, text, mine) { pushChat(`<span class="who">${esc(name)}</s
 function addSys(html, kind, gameOnly) { pushChat(html, 'sys ' + (kind || ''), gameOnly); }
 function chatReset() { el.chatLobby.innerHTML = el.chatGame.innerHTML = ''; }
 
-el.dlgResult.addEventListener('close', () => { if (S && S.phase === 'lobby') show('scRoom'); });
+el.dlgResult.addEventListener('close', () => {
+  if (el.dlgResult.returnValue === 'again' && isHost() && S.phase === 'lobby') { send({ t: 'start' }); return; }
+  if (S && S.phase === 'lobby') show('scRoom');
+});
+el.btnGiveup.onclick = () => { send({ t: 'giveup' }); el.entry.focus(); };
 // 판 아무 데나 누르면 입력칸으로 (단추 · 채팅 칸은 빼고)
 el.scGame.addEventListener('click', e => {
   if (e.target.closest('button, input, a, .chat-box')) return;

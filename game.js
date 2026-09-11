@@ -4,7 +4,7 @@
  *  - 낱말 판정 · 타이머 · 점수 · 봇은 전부 서버가 쥔다(권위 서버).
  *  - 통신 방식은 모른다. 소켓은 send(문자열) · close() · readyState 만 있으면 된다.
  *    Node 서버(server.js)와 Cloudflare(worker.js)가 이 파일을 똑같이 쓴다.
- *  - 사전은 밖에서 loadDict(글) 로 넣어 준다. 한 줄에 한 낱말, 흔한 낱말은 앞에 '*'.
+ *  - 사전은 밖에서 loadDict(글) 로 넣어 준다. 한 줄에 한 낱말, 앞에 붙은 표시: '*' 흔한 낱말 · '~' 외래어가 든 말.
  */
 
 /* ─────────────────────────── 한글 ─────────────────────────── */
@@ -32,16 +32,25 @@ const startsFrom = c => { const d = dueum(c); return d === c ? [c] : [c, d]; };
 
 let WORDS = null;          // Set — 판정용 전체 낱말
 let COMMON = null;         // Set — 흔한 낱말(봇이 먼저 고른다)
-const POOLS = new Map();   // '모드:all|common' → Map(첫 글자 → [낱말])
+let FOREIGN = null;        // Set — 외래어이거나 외래어가 섞인 말 (버스 · 버스표). '외래어 금지' 방에서 막는다
+const POOLS = new Map();   // '모드:all|common:외래어 금지' → Map(첫 글자 → [낱말])
 
 function loadDict(text) {
   if (WORDS) return;
-  WORDS = new Set(); COMMON = new Set();
+  WORDS = new Set(); COMMON = new Set(); FOREIGN = new Set();
   for (let line of String(text).split('\n')) {
     line = line.trim();
+    let common = false, foreign = false;
+    for (;;) {
+      if (line[0] === '*') common = true;
+      else if (line[0] === '~') foreign = true;
+      else break;
+      line = line.slice(1);
+    }
     if (!line) continue;
-    if (line[0] === '*') { line = line.slice(1); COMMON.add(line); }
     WORDS.add(line);
+    if (common) COMMON.add(line);
+    if (foreign) FOREIGN.add(line);
   }
 }
 
@@ -49,21 +58,22 @@ function loadDict(text) {
 /* 모드는 여기 한 곳에서만 갈린다. 글자 수 조건과 차례 시간이 이 표에 있다.
    turn: [첫 차례 시간, 가장 짧은 시간, 한 번 이어질 때마다 줄어드는 시간] (ms) */
 const MODES = {
-  classic: { ko: '끝말잇기', fits: w => w.length >= 2, turn: [12000, 4000, 300] },
-  kkt:     { ko: '쿵쿵따',   fits: w => w.length === 3, turn: [8000, 3000, 200] },
+  classic: { ko: '끝말잇기', fits: w => w.length >= 2, turn: [10000, 3500, 300] },
+  kkt:     { ko: '쿵쿵따',   fits: w => w.length === 3, turn: [7000, 2500, 200] },
 };
 const MODE_KEYS = Object.keys(MODES);
 const modeOf = room => MODES[room.cfg.mode] || MODES.classic;
+const timed = room => room.cfg.roundTime > 0;
 
 /** 모드에 맞는 낱말을 첫 글자별로 묶은 것. 처음 쓸 때 만든다. */
-function pool(modeKey, common) {
-  const key = modeKey + (common ? ':common' : ':all');
+function pool(modeKey, common, noForeign = false) {
+  const key = modeKey + (common ? ':common' : ':all') + (noForeign ? ':nf' : '');
   let m = POOLS.get(key);
   if (m) return m;
   m = new Map();
   const fits = (MODES[modeKey] || MODES.classic).fits;
   for (const w of common ? COMMON : WORDS) {
-    if (!fits(w)) continue;
+    if (!fits(w) || (noForeign && FOREIGN.has(w))) continue;
     let a = m.get(w[0]);
     if (!a) m.set(w[0], a = []);
     a.push(w);
@@ -71,6 +81,8 @@ function pool(modeKey, common) {
   POOLS.set(key, m);
   return m;
 }
+/** 이 방 규칙(모드 · 외래어 금지)에 맞는 묶음 */
+const poolFor = (room, common) => pool(room.cfg.mode, common, room.cfg.noForeign);
 
 /** 이 글자들로 시작하는, 아직 안 쓴 낱말 */
 function candidates(p, starts, used, limit = Infinity) {
@@ -85,7 +97,7 @@ function candidates(p, starts, used, limit = Infinity) {
 
 /** 이 낱말 다음에 이을 말이 사전에 하나라도 남아 있나 — 없으면 '한방 단어' */
 function hasNext(room, word, used) {
-  const p = pool(room.cfg.mode, false);
+  const p = poolFor(room, false);
   for (const c of startsFrom(word[word.length - 1])) {
     for (const w of p.get(c) || []) if (w !== word && !used.has(w)) return true;
   }
@@ -94,11 +106,11 @@ function hasNext(room, word, used) {
 
 /** 그 글자로 이을 수 있는 낱말 수 (봇이 상대를 몰아붙일 때 쓴다) */
 const contCache = new Map();
-function contCount(modeKey, c) {
-  const key = modeKey + c;
+function contCount(room, c) {
+  const key = room.cfg.mode + (room.cfg.noForeign ? ':nf' : '') + c;
   let n = contCache.get(key);
   if (n == null) {
-    const p = pool(modeKey, false);
+    const p = poolFor(room, false);
     n = startsFrom(c).reduce((s, x) => s + (p.get(x) || []).length, 0);
     contCache.set(key, n);
   }
@@ -113,11 +125,12 @@ const GAP_MS = 450;            // 낱말이 받아들여지고 다음 차례가 
 const FAIL_PAUSE = 2600;       // 시간 초과 뒤 다음 라운드까지
 const INTRO_MS = 1800;         // 라운드 시작 알림
 const DOOMED_MS = 5000;        // 이을 말이 사전에 없는 차례는 이만큼만 기다린다
+const DC_MS = 8000;            // 시간제한 없는 방에서 연결이 끊긴 사람 차례는 이만큼 뒤에 넘긴다
 const LOBBY_GRACE = 20_000;    // 대기실에서 끊긴 자리를 비우기까지 (새로고침은 이 안에 돌아온다)
 
 const CFG_CHOICES = {
   rounds: [3, 4, 5, 6],
-  roundTime: [60, 90, 120, 150],
+  roundTime: [0, 60, 90, 120, 150],   // 0 = 시간제한 없음 (라운드 · 차례 시계 모두 끔)
   botDiff: ['easy', 'normal', 'hard'],
 };
 
@@ -141,12 +154,12 @@ const token = () => Array.from(globalThis.crypto.getRandomValues(new Uint8Array(
   b => b.toString(16).padStart(2, '0')).join('');
 const clean = (s, max) => String(s == null ? '' : s).replace(/\s+/g, ' ').trim().slice(0, max);
 
-/** 점수 — 긴 낱말일수록 크게, 이어진 횟수 · 빠르기 · 미션 글자에 덤 */
+/** 점수 — 긴 낱말일수록 크게, 이어진 횟수 · 빠르기 · 미션 글자에 덤. 시간제한이 없으면(limit 0) 빠르기는 1. */
 function scoreOf(word, chain, left, limit, missionHits) {
   const n = word.length;
   const base = 4 + 4 * n + n * n;                        // 2글자 16 · 3글자 25 · 5글자 49 · 8글자 100
   const combo = 1 + Math.min(chain, 25) * 0.04;
-  const speed = 0.7 + 0.6 * clamp(left / limit, 0, 1);
+  const speed = limit > 0 ? 0.7 + 0.6 * clamp(left / limit, 0, 1) : 1;
   return Math.round(base * combo * speed * (1 + 0.5 * missionHits));
 }
 
@@ -172,8 +185,8 @@ function createRoom({ title, priv, mode }) {
     hostId: null,
     players: [],
     nextId: 1,
-    cfg: { mode: MODE_KEYS.includes(mode) ? mode : 'classic', rounds: 5, roundTime: 90,
-           mission: false, manner: false, botDiff: 'normal' },
+    cfg: { mode: MODE_KEYS.includes(mode) ? mode : 'classic', rounds: 5, roundTime: 60,
+           mission: false, manner: false, noForeign: false, botDiff: 'normal' },
     g: null,
     timers: { turn: null, step: null, bot: null },
     lastActive: Date.now(),
@@ -302,7 +315,7 @@ function pushList() {
 /** 라운드마다 시작 글자를 주는 제시어. 라운드 수만큼의 글자, 글자마다 이을 말이 넉넉해야 한다. */
 function pickRoundWord(room) {
   const n = room.cfg.rounds, mk = room.cfg.mode;
-  const common = pool(mk, true);
+  const common = poolFor(room, true);
   const good = c => (common.get(c) || []).length >= (mk === 'kkt' ? 6 : 25);
   const src = [...COMMON].filter(w => w.length === n);
   for (let i = 0; i < 600 && src.length; i++) {
@@ -350,7 +363,7 @@ function beginRound(room, firstId) {
   g.chain = 0;
   g.lastWord = null; g.lastBy = null;
   g.starts = startsFrom(g.roundWord[g.round - 1]);
-  g.roundLeft = room.cfg.roundTime * 1000;
+  g.roundLeft = room.cfg.roundTime * 1000;       // 시간제한 없음이면 0 — 쓰지 않는다
   g.stage = 'intro';
   g.turnId = firstId;
   g.turnStart = 0; g.turnLimit = 0;
@@ -359,8 +372,10 @@ function beginRound(room, firstId) {
   room.timers.step = setTimeout(() => beginTurn(room, firstId), INTRO_MS);
 }
 
+/** 이번 차례 시간 (ms). 0 이면 제한 없음. */
 function turnLimitOf(room) {
   const g = room.g;
+  if (!timed(room)) return 0;
   const [start, min, step] = modeOf(room).turn;
   return Math.min(g.roundLeft, Math.max(min, start - g.chain * step));
 }
@@ -373,12 +388,14 @@ function beginTurn(room, id) {
   g.turnId = id;
   g.turnStart = Date.now();
   g.turnLimit = turnLimitOf(room);
+  const p = room.players.find(x => x.id === id);
   // 이을 말이 사전에 없으면(한방 단어를 받았으면) 오래 붙잡아 두지 않는다
-  if (g.lastWord && !hasNext(room, g.lastWord, g.used)) g.turnLimit = Math.min(g.turnLimit, DOOMED_MS);
-  room.timers.turn = setTimeout(() => fail(room, id), g.turnLimit);
+  if (g.lastWord && !hasNext(room, g.lastWord, g.used)) g.turnLimit = Math.min(g.turnLimit || DOOMED_MS, DOOMED_MS);
+  // 시간제한 없는 방이라도 연결이 끊긴 사람 차례에서 판이 멈추지 않게
+  else if (!g.turnLimit && p && !p.bot && !p.connected) g.turnLimit = DC_MS;
+  if (g.turnLimit) room.timers.turn = setTimeout(() => fail(room, id), g.turnLimit);
   pushState(room);
 
-  const p = room.players.find(x => x.id === id);
   if (p && p.bot) scheduleBot(room, p);
 
   // 앞 차례가 끝나기 직전에 쳐 둔 낱말
@@ -400,6 +417,7 @@ function check(room, word) {
   if (!g.starts.includes(word[0])) return 'start';
   if (!WORDS.has(word)) return 'nodict';
   if (g.used.has(word)) return 'used';
+  if (room.cfg.noForeign && FOREIGN.has(word)) return 'foreign';
   if (room.cfg.manner && !hasNext(room, word, new Set(g.used).add(word))) return 'hanbang';
   return null;
 }
@@ -414,7 +432,7 @@ function tryWord(room, p, word) {
   const now = Date.now();
   const used = now - g.turnStart;
   const left = Math.max(0, g.turnLimit - used);
-  g.roundLeft = Math.max(0, g.roundLeft - used);
+  if (timed(room)) g.roundLeft = Math.max(0, g.roundLeft - used);
 
   const hits = g.mission ? [...word].filter(c => c === g.mission).length : 0;
   const pts = scoreOf(word, g.chain, left, g.turnLimit, hits);
@@ -439,20 +457,23 @@ function tryWord(room, p, word) {
   room.timers.step = setTimeout(() => beginTurn(room, g.turnId), GAP_MS);
 }
 
-function fail(room, id) {
+/** 차례를 못 넘겼다 — 시간 초과, 포기(why 'giveup'), 연결 끊김 */
+function fail(room, id, why) {
   const g = room.g;
   if (!g || g.stage !== 'turn' || g.turnId !== id) return;
   clearTimeout(room.timers.turn); clearTimeout(room.timers.bot);
   const used = Date.now() - g.turnStart;
-  g.roundLeft = Math.max(0, g.roundLeft - used);
+  if (timed(room)) g.roundLeft = Math.max(0, g.roundLeft - used);
+  const p0 = room.players.find(x => x.id === id);
+  if (!why) why = timed(room) ? (g.roundLeft <= 0 ? 'round' : 'time') : p0 && !p0.bot && !p0.connected ? 'dc' : 'time';
   const p = room.players.find(x => x.id === id);
   if (p) p.score -= FAIL_PENALTY;
   g.stage = 'fail';
-  const hint = candidates(pool(room.cfg.mode, true), g.starts, g.used, 40);
+  const hint = candidates(poolFor(room, true), g.starts, g.used, 40);
   ev(room, {
-    kind: 'fail', by: id, penalty: FAIL_PENALTY, why: g.roundLeft <= 0 ? 'round' : 'time',
+    kind: 'fail', by: id, penalty: FAIL_PENALTY, why,
     // 이런 말이 있었다 — 흔한 낱말에서 하나, 없으면 전체에서
-    hint: hint.length ? pick(hint) : (candidates(pool(room.cfg.mode, false), g.starts, g.used, 1)[0] || null),
+    hint: hint.length ? pick(hint) : (candidates(poolFor(room, false), g.starts, g.used, 1)[0] || null),
   });
   pushState(room);
   room.timers.step = setTimeout(() => {
@@ -471,8 +492,10 @@ function leftMidGame(room, id) {
   if (g.order.length < 2) { endGame(room); return; }
   if (g.turnId !== id) { pushState(room); return; }
   if (g.stage === 'turn') {
-    g.roundLeft = Math.max(0, g.roundLeft - (Date.now() - g.turnStart));
-    if (g.roundLeft <= 0) { g.turnId = next; g.turnStart = Date.now(); fail(room, next); return; }
+    if (timed(room)) {
+      g.roundLeft = Math.max(0, g.roundLeft - (Date.now() - g.turnStart));
+      if (g.roundLeft <= 0) { g.turnId = next; g.turnStart = Date.now(); fail(room, next); return; }
+    }
     beginTurn(room, next);
   } else {
     g.turnId = next;              // 라운드 시작 알림 · 낱말 사이 — 예약된 차례가 이 사람을 가리키게
@@ -500,11 +523,11 @@ function endGame(room) {
 /* ─────────────────────────── 봇 ─────────────────────────── */
 
 function botPick(room) {
-  const g = room.g, mk = room.cfg.mode;
+  const g = room.g;
   const B = BOT[room.cfg.botDiff] || BOT.normal;
   let cands = [];
-  if (B.full < 1) cands = candidates(pool(mk, true), g.starts, g.used);
-  if (!cands.length && Math.random() < B.full) cands = candidates(pool(mk, false), g.starts, g.used);
+  if (B.full < 1) cands = candidates(poolFor(room, true), g.starts, g.used);
+  if (!cands.length && Math.random() < B.full) cands = candidates(poolFor(room, false), g.starts, g.used);
   if (room.cfg.manner) cands = cands.filter(w => hasNext(room, w, new Set(g.used).add(w)));
   if (!cands.length) return null;
 
@@ -517,7 +540,7 @@ function botPick(room) {
     let best = null, bestS = -Infinity;
     for (let i = 0; i < 80; i++) {
       const w = pick(cands);
-      const s = w.length * 1.2 - Math.log2(1 + contCount(mk, w[w.length - 1])) * 1.5 + Math.random() * 2;
+      const s = w.length * 1.2 - Math.log2(1 + contCount(room, w[w.length - 1])) * 1.5 + Math.random() * 2;
       if (s > bestS) { best = w; bestS = s; }
     }
     return best;
@@ -528,11 +551,17 @@ function botPick(room) {
 function scheduleBot(room, p) {
   const g = room.g;
   const B = BOT[room.cfg.botDiff] || BOT.normal;
-  if (Math.random() < B.miss) return;             // 생각이 안 난다
-  const word = botPick(room);
-  if (!word) return;                              // 이을 말이 없다 — 시간이 다 가길 기다린다
+  const word = Math.random() < B.miss ? null : botPick(room);   // 생각이 안 나거나 이을 말이 없다
+  if (!word) {
+    // 시간이 흐르는 방이면 다 가길 기다린다. 시간제한이 없으면 잠깐 고민하다 포기한다.
+    if (!g.turnLimit) {
+      room.timers.bot = setTimeout(() => { room.timers.bot = null; if (room.g === g) fail(room, p.id, 'giveup'); },
+        rnd(B.think[1], B.think[1] * 2));
+    }
+    return;
+  }
   const delay = rnd(B.think[0], B.think[1]) + word.length * B.perChar;
-  if (delay >= g.turnLimit - 80) return;          // 늦는다
+  if (g.turnLimit && delay >= g.turnLimit - 80) return;          // 늦는다
   room.timers.bot = setTimeout(() => {
     room.timers.bot = null;
     if (room.g === g && g.stage === 'turn' && g.turnId === p.id) tryWord(room, p, word);
@@ -544,6 +573,12 @@ function scheduleBot(room, p) {
 function attach(room, p, ws) {
   clearTimeout(p.leaveT);
   watchers.delete(ws);
+  const g = room.g;
+  // 시간제한 없는 방에서 끊겨 있던 사이 걸어 둔 '차례 넘기기'를 푼다 (새로고침하고 돌아왔다)
+  if (!p.connected && g && g.stage === 'turn' && g.turnId === p.id && !timed(room) && g.turnLimit === DC_MS) {
+    clearTimeout(room.timers.turn); room.timers.turn = null;
+    g.turnLimit = 0;
+  }
   p.ws = ws; p.connected = true;
   ws.roomCode = room.code; ws.playerId = p.id;
   send(ws, { t: 'welcome', you: p.id, token: p.token, code: room.code });
@@ -652,6 +687,7 @@ function handle(ws, msg) {
       for (const k of Object.keys(CFG_CHOICES)) if (CFG_CHOICES[k].includes(msg[k])) c[k] = msg[k];
       if (typeof msg.mission === 'boolean') c.mission = msg.mission;
       if (typeof msg.manner === 'boolean') c.manner = msg.manner;
+      if (typeof msg.noForeign === 'boolean') c.noForeign = msg.noForeign;
       if (typeof msg.priv === 'boolean') room.priv = msg.priv;
       if (typeof msg.title === 'string' && clean(msg.title, 20)) room.title = clean(msg.title, 20);
       pushState(room); listChanged();
@@ -687,6 +723,10 @@ function handle(ws, msg) {
       broadcast(room, { t: 'chat', from: me.id, name: me.name, text });
       break;
     }
+
+    case 'giveup':                                       // 내 차례를 포기한다 — 시간이 다 간 것과 같다
+      if (room.g && room.g.stage === 'turn' && room.g.turnId === me.id) fail(room, me.id, 'giveup');
+      break;
 
     case 'stop':                                         // 방장이 판을 접는다
       if (!isHost || lobby) return;
@@ -735,6 +775,13 @@ function disconnect(ws, { keepSeat = false } = {}) {
     }
   }
   // 판 중에 끊긴 사람은 자리를 지킨다. 차례가 오면 시간이 흘러 넘어간다.
+  // 시간제한 없는 방이면 시간이 흐르지 않으니 잠깐 뒤 넘긴다.
+  const g = room.g;
+  if (g && g.stage === 'turn' && g.turnId === p.id && !g.turnLimit) {
+    g.turnLimit = DC_MS;
+    g.turnStart = Date.now();
+    room.timers.turn = setTimeout(() => fail(room, p.id, 'dc'), DC_MS);
+  }
   pushState(room);
   listChanged();
 }
@@ -756,6 +803,8 @@ function selfCheck() {
   for (const [a, b] of Object.entries(cases)) eq(dueum(a), b, `두음 ${a}`);
   if (!WORDS || WORDS.size < 1000) throw new Error('사전이 비었습니다 — loadDict 를 먼저 부르세요');
   for (const w of ['사과', '과자', '자동차', '역사', '이력']) if (!WORDS.has(w)) throw new Error(`사전에 '${w}' 가 없습니다`);
+  for (const w of ['버스', '컴퓨터']) if (!FOREIGN.has(w)) throw new Error(`'${w}' 가 외래어로 표시되지 않았습니다`);
+  for (const w of ['사과', '밥상']) if (FOREIGN.has(w)) throw new Error(`'${w}' 가 외래어로 잘못 표시됐습니다`);
   for (const k of MODE_KEYS) {
     const n = [...pool(k, false).values()].reduce((s, a) => s + a.length, 0);
     console.log(`  ${MODES[k].ko.padEnd(5)} 낱말 ${n.toLocaleString()}개`);
@@ -765,5 +814,5 @@ function selfCheck() {
 module.exports = {
   rooms, handle, disconnect, sweepRooms, selfCheck, loadDict, MAX_PLAYERS,
   // 시험용
-  _t: { dueum, startsFrom, scoreOf, check, hasNext, candidates, pool, get WORDS() { return WORDS; } },
+  _t: { dueum, startsFrom, scoreOf, check, hasNext, candidates, pool, get WORDS() { return WORDS; }, get FOREIGN() { return FOREIGN; } },
 };
