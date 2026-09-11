@@ -69,8 +69,11 @@ input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-so
 .check { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; user-select: none; }
 .check input { width: 17px; height: 17px; accent-color: var(--line); }
 
-.seg { display: inline-flex; border: 1.5px solid var(--ink3); border-radius: 8px; overflow: hidden; background: #fff; }
+/* 둥근 모서리는 양끝 단추가 맡는다 — overflow 로 자르면 단추에 붙은 말풍선까지 잘린다 */
+.seg { display: inline-flex; border: 1.5px solid var(--ink3); border-radius: 8px; background: #fff; }
 .seg button { border: 0; background: transparent; padding: 6px 12px; cursor: pointer; font-size: 14px; }
+.seg button:first-child { border-radius: 6.5px 0 0 6.5px; }
+.seg button:last-child { border-radius: 0 6.5px 6.5px 0; }
 .seg button + button { border-left: 1px solid var(--line-soft); }
 .seg button.on { background: var(--ink); color: #fff; }
 .seg.locked button { cursor: default; }
@@ -346,3 +349,17 @@ input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-so
 .entry input::placeholder { font: 500 16px var(--sans); color: var(--ink3); }
 .entry .giveup { flex: none; color: var(--bad); border: 1.5px solid rgba(192, 57, 43, .35); margin-left: 4px; }
 .entry .giveup:hover { background: #fff1ee; color: var(--bad); }
+
+/* 말풍선 — data-tip 을 단 단추에 마우스를 올리면 바로 뜬다 */
+[data-tip] { position: relative; }
+[data-tip]:hover::after, [data-tip]:focus-visible::after {
+  content: attr(data-tip); position: absolute; left: 50%; top: calc(100% + 9px); transform: translateX(-50%);
+  background: var(--ink); color: #fff; font: 500 12.5px/1.4 var(--sans); white-space: nowrap;
+  padding: 6px 10px; border-radius: 8px; z-index: 30; pointer-events: none;
+  box-shadow: 0 6px 18px rgba(43, 38, 34, .25); animation: tipIn .12s ease-out;
+}
+[data-tip]:hover::before, [data-tip]:focus-visible::before {
+  content: ''; position: absolute; left: 50%; top: calc(100% + 3px); transform: translateX(-50%);
+  border: 6px solid transparent; border-top: 0; border-bottom-color: var(--ink); z-index: 30; pointer-events: none;
+}
+@keyframes tipIn { from { opacity: 0; margin-top: -3px; } }
