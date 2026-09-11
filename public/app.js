@@ -42,8 +42,9 @@ const WHY = {
   hanbang: '한방 단어 금지',
   foreign: '외래어 금지',
 };
-const FAIL_STAMP = { round: '라운드 끝', time: '시간 초과', giveup: '포기', dc: '연결 끊김' };
-const FAIL_LINE = { round: '라운드 시간 초과', time: '차례 시간 초과', giveup: '포기', dc: '연결이 끊겨 차례를 넘김' };
+// 포기도 판에서는 시간 초과로 보인다 — 차례를 못 넘긴 건 같다
+const FAIL_STAMP = { round: '라운드 끝', time: '시간 초과', giveup: '시간 초과', dc: '연결 끊김' };
+const FAIL_LINE = { round: '라운드 시간 초과', time: '차례 시간 초과', giveup: '시간 초과(포기)', dc: '연결이 끊겨 차례를 넘김' };
 const timedRoom = () => S && S.cfg.roundTime > 0;
 
 let toastT = null;
