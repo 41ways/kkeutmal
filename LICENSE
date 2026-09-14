@@ -20,7 +20,3 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
----
-dict/ 와 public/dict/ 의 낱말·뜻풀이 자료는 이 MIT 허가의 대상이 아니다.
-국립국어원 《표준국어대사전》(CC BY-SA 2.0 KR)과 hunspell-dict-ko(CC BY-SA 4.0)에서
-뽑아 다듬은 것이며 CC BY-SA 조건을 따른다.
