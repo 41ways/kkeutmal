@@ -167,5 +167,10 @@ test/smoke.js        떠 있는 서버 확인
   - 국립국어원 《표준국어대사전》 — [CC BY-SA 2.0 KR](https://creativecommons.org/licenses/by-sa/2.0/kr/) ([spellcheck-ko/korean-dict-nikl-stdict](https://github.com/spellcheck-ko/korean-dict-nikl-stdict) 의 XML)
   - [hunspell-dict-ko](https://github.com/spellcheck-ko/hunspell-dict-ko) 낱말 데이터 — CC BY-SA 4.0
 - 끄투(KKuTu)의 규칙에서 영감을 받았지만 끄투의 코드나 그림은 쓰지 않았다.
+---
+dict/ 와 public/dict/ 의 낱말·뜻풀이 자료는 이 MIT 허가의 대상이 아니다.
+국립국어원 《표준국어대사전》(CC BY-SA 2.0 KR)과 hunspell-dict-ko(CC BY-SA 4.0)에서
+뽑아 다듬은 것이며 CC BY-SA 조건을 따른다.
+
 
 비영리 개인 프로젝트입니다. 문의: gyolno2@naver.com
