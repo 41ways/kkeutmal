@@ -6,14 +6,14 @@
   stdict.tsv        tools/fetch-stdict.py 가 만든 표준국어대사전 표제어 (국립국어원, CC BY-SA 2.0 KR)
   dict-ko-data.yaml hunspell-dict-ko 의 낱말 데이터 (spellcheck-ko, CC BY-SA 4.0)
   opendict.tsv      tools/fetch-opendict.py 가 만든 우리말샘 명사 뜻 (국립국어원, CC BY-SA 2.0 KR)
-  dict/injeong/*.txt  어인정 낱말 — 사전에 없는 말을 주제별로 직접 모은 목록 (첫 줄 '# 주제: 이름')
+  dict/injeong/*.txt  사전 외 낱말 — 사전에 없는 말을 주제별로 직접 모은 목록 (첫 줄 '# 주제: 이름')
 
 결과
   dict/words.txt       서버가 쓰는 낱말 목록. 한 줄에 하나, 앞에 붙은 표시:
                          '*' 흔한 낱말(hunspell 명사) — 봇 · 제시어 · 힌트가 먼저 쓴다
                          '~' 외래어가 든 말 — '외래어 금지' 방에서 막는다
                          '!' 표준어 명사가 아닌 말(방언 · 옛말 · 북한어, 띄어 쓰는 구) — '표준어만' 방에서 막는다
-                         '+' 어인정 낱말 — '어인정'을 켠 방에서만 받는다
+                         '+' 사전 외 낱말(끄투의 어인정) — '사전 외 낱말'을 켠 방에서만 받는다
   public/dict/<hex>.json  첫 글자별 뜻풀이 {낱말: 뜻 | [뜻, 뜻, …]}. 화면이 낱말을 띄울 때 받아 간다.
                        소리가 같은 낱말은 넷까지. 사전 번호는 쓰임 순서가 아니라서(사과01 이 '참외')
                        분야 표시가 없는 일반 뜻을 앞에 세운다. 표준 뜻이 있으면 방언 · 옛말 뜻은 싣지 않는다.
@@ -148,7 +148,7 @@ for path in sorted(glob.glob(os.path.join(ROOT, 'dict', 'injeong', '*.txt'))):
         if w not in defs and w not in common and w not in injeong:
             injeong[w] = topic
             topics[topic] += 1
-            defs[w] = [f'어인정 · {topic}']
+            defs[w] = [f'사전 외 낱말 · {topic}']
             foreign[w] = guess_foreign(w)
 
 words = sorted(set(defs) | common)

@@ -35,7 +35,7 @@ let WORDS = null;          // Set — 판정용 전체 낱말
 let COMMON = null;         // Set — 흔한 낱말(봇이 먼저 고른다)
 let FOREIGN = null;        // Set — 외래어이거나 외래어가 섞인 말 (버스 · 버스표). '외래어 금지' 방에서 막는다
 let NONSTD = null;         // Set — 방언 · 옛말 · 북한어 · 띄어 쓰는 구(치과기공사). '표준어만' 방에서 막는다
-let INJEONG = null;        // Set — 어인정 낱말(사전에 없는 말을 주제별로 모은 것). '어인정'을 켠 방에서만 받는다
+let INJEONG = null;        // Set — 어인정 낱말(사전에 없는 말을 주제별로 모은 것). '사전 외 낱말'을 켠 방에서만 받는다
 const POOLS = new Map();   // '모드:all|common:규칙' → Map(첫 글자 → [낱말]) — 최근 쓴 순서
 const POOL_KEEP = 6;
 
@@ -66,7 +66,7 @@ const modeOf = room => MODES[room.cfg.mode] || MODES.classic;
 const timed = room => room.cfg.roundTime > 0;
 
 /** 모드와 규칙에 맞는 낱말을 첫 글자별로 묶은 것. 처음 쓸 때 만든다.
- *  rules: { noForeign, strict(표준어만), injeong(어인정) } */
+ *  rules: { noForeign, strict(표준어만), injeong(사전 외 낱말) } */
 function pool(modeKey, common, rules = {}) {
   if (typeof rules === 'boolean') rules = { noForeign: rules };
   const { noForeign = false, strict = false, injeong = false } = rules;
