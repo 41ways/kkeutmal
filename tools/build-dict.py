@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 """끝말잇기 사전을 만든다.
 
-  python3 tools/build-dict.py <stdict.tsv> <dict-ko-data.yaml>
+  python3 tools/build-dict.py <stdict.tsv> <dict-ko-data.yaml> [opendict.tsv]
 
   stdict.tsv        tools/fetch-stdict.py 가 만든 표준국어대사전 표제어 (국립국어원, CC BY-SA 2.0 KR)
   dict-ko-data.yaml hunspell-dict-ko 의 낱말 데이터 (spellcheck-ko, CC BY-SA 4.0)
+  opendict.tsv      tools/fetch-opendict.py 가 만든 우리말샘 명사 뜻 (국립국어원, CC BY-SA 2.0 KR).
+                    표준국어대사전에 없는 낱말 가운데 뜻 갈래가 '일반어'인 것만 더한다(방언 · 북한어 · 옛말 제외).
+                    치맥 · 혼밥 · 와이파이 · 마라탕 같은 새말과 전문어 · 지명이 여기서 들어온다.
 
 결과
   dict/words.txt       서버가 쓰는 낱말 목록. 한 줄에 하나, 앞에 붙은 표시:
@@ -16,6 +19,7 @@
 import collections, json, os, re, shutil, sys
 
 tsv, yaml = sys.argv[1], sys.argv[2]
+opendict = sys.argv[3] if len(sys.argv) > 3 else None
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 HANGUL = re.compile(r'[가-힣]{2,}')
 # 표준어가 아닌 것을 가리키는 뜻풀이 — '‘가위’의 방언(경상).' 같은 것
@@ -60,6 +64,29 @@ for line in open(tsv, encoding='utf-8'):
     defs.setdefault(w, []).append((1 if cat else 0, len(defs[w]), d))
     # '모라'처럼 소리가 같은 고유어가 하나라도 있으면 그 뜻으로 친 것일 수 있어 막지 않는다
     foreign[w] = foreign.get(w, True) and is_foreign(wtype, langs)
+
+# 우리말샘 — 표준국어대사전에 없는 낱말만. 한 줄이 뜻 하나라 같은 낱말이 여러 줄로 온다.
+od_added = 0
+if opendict:
+    od_defs, od_foreign = {}, {}
+    for line in open(opendict, encoding='utf-8'):
+        f = line.rstrip('\n').split('\t')
+        if len(f) < 8:
+            continue
+        w, pos, unit, wtype, typ, cat, d, langs = f
+        if unit != '어휘' or pos not in ('명사', '대명사', '수사'):
+            continue
+        k = re.sub(r'[\d\-^]', '', w)
+        if not HANGUL.fullmatch(k):
+            continue
+        foreign_any[k] = foreign_any.get(k, True) and is_foreign(wtype, langs)
+        if typ != '일반어' or k in defs or NONSTD.search(d):
+            continue
+        od_defs.setdefault(k, []).append((1 if cat else 0, len(od_defs[k]), d))
+        od_foreign[k] = od_foreign.get(k, True) and is_foreign(wtype, langs)
+    defs.update(od_defs)
+    foreign.update(od_foreign)
+    od_added = len(od_defs)
 
 for w, got in defs.items():
     out = []
@@ -113,5 +140,5 @@ for ch, m in shards.items():
         json.dump(m, f, ensure_ascii=False, separators=(',', ':'), sort_keys=True)
 
 size = sum(os.path.getsize(os.path.join(shard_dir, x)) for x in os.listdir(shard_dir))
-print(f'낱말 {len(words):,}개 (흔한 낱말 {len(common):,} · 외래어 {sum(1 for w in words if foreign.get(w)):,}) · 뜻풀이 {sum(map(len, shards.values())):,}개 '
+print(f'낱말 {len(words):,}개 (우리말샘에서 더한 것 {od_added:,} · 흔한 낱말 {len(common):,} · 외래어 {sum(1 for w in words if foreign.get(w)):,}) · 뜻풀이 {sum(map(len, shards.values())):,}개 '
       f'· 조각 {len(shards):,}개 {size / 1e6:.1f}MB')
