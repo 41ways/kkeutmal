@@ -44,6 +44,9 @@ const WHY = {
   used: '이미 나온 말',
   hanbang: '한방 단어 금지',
   foreign: '외래어 금지',
+  strict: '표준어만 — 방언 · 옛말 · 띄어 쓰는 말은 안 됨',
+  injeong: '어인정 낱말 — 이 방은 어인정이 꺼져 있음',
+  firstkill: '라운드 첫 낱말은 한방 단어 안 됨',
 };
 // 포기도 판에서는 시간 초과로 보인다 — 차례를 못 넘긴 건 같다
 const FAIL_STAMP = { round: '라운드 끝', time: '시간 초과', giveup: '시간 초과', dc: '연결 끊김' };

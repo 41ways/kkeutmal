@@ -4,7 +4,8 @@
  *  - 낱말 판정 · 타이머 · 점수 · 봇은 전부 서버가 쥔다(권위 서버).
  *  - 통신 방식은 모른다. 소켓은 send(문자열) · close() · readyState 만 있으면 된다.
  *    Node 서버(server.js)와 Cloudflare(worker.js)가 이 파일을 똑같이 쓴다.
- *  - 사전은 밖에서 loadDict(글) 로 넣어 준다. 한 줄에 한 낱말, 앞에 붙은 표시: '*' 흔한 낱말 · '~' 외래어가 든 말.
+ *  - 사전은 밖에서 loadDict(글) 로 넣어 준다. 한 줄에 한 낱말, 앞에 붙은 표시:
+ *    '*' 흔한 낱말 · '~' 외래어가 든 말 · '!' 표준어 명사가 아닌 말(방언 · 옛말 · 북한어 · 띄어 쓰는 구) · '+' 어인정.
  */
 
 /* ─────────────────────────── 한글 ─────────────────────────── */
@@ -33,24 +34,23 @@ const startsFrom = c => { const d = dueum(c); return d === c ? [c] : [c, d]; };
 let WORDS = null;          // Set — 판정용 전체 낱말
 let COMMON = null;         // Set — 흔한 낱말(봇이 먼저 고른다)
 let FOREIGN = null;        // Set — 외래어이거나 외래어가 섞인 말 (버스 · 버스표). '외래어 금지' 방에서 막는다
-const POOLS = new Map();   // '모드:all|common:외래어 금지' → Map(첫 글자 → [낱말])
+let NONSTD = null;         // Set — 방언 · 옛말 · 북한어 · 띄어 쓰는 구(치과기공사). '표준어만' 방에서 막는다
+let INJEONG = null;        // Set — 어인정 낱말(사전에 없는 말을 주제별로 모은 것). '어인정'을 켠 방에서만 받는다
+const POOLS = new Map();   // '모드:all|common:규칙' → Map(첫 글자 → [낱말]) — 최근 쓴 순서
+const POOL_KEEP = 6;
 
 function loadDict(text) {
   if (WORDS) return;
-  WORDS = new Set(); COMMON = new Set(); FOREIGN = new Set();
+  WORDS = new Set(); COMMON = new Set(); FOREIGN = new Set(); NONSTD = new Set(); INJEONG = new Set();
+  const marks = { '*': COMMON, '~': FOREIGN, '!': NONSTD, '+': INJEONG };
   for (let line of String(text).split('\n')) {
     line = line.trim();
-    let common = false, foreign = false;
-    for (;;) {
-      if (line[0] === '*') common = true;
-      else if (line[0] === '~') foreign = true;
-      else break;
-      line = line.slice(1);
-    }
-    if (!line) continue;
-    WORDS.add(line);
-    if (common) COMMON.add(line);
-    if (foreign) FOREIGN.add(line);
+    let i = 0;
+    while (marks[line[i]]) i++;
+    const w = line.slice(i);
+    if (!w) continue;
+    WORDS.add(w);
+    for (let j = 0; j < i; j++) marks[line[j]].add(w);
   }
 }
 
@@ -65,15 +65,20 @@ const MODE_KEYS = Object.keys(MODES);
 const modeOf = room => MODES[room.cfg.mode] || MODES.classic;
 const timed = room => room.cfg.roundTime > 0;
 
-/** 모드에 맞는 낱말을 첫 글자별로 묶은 것. 처음 쓸 때 만든다. */
-function pool(modeKey, common, noForeign = false) {
-  const key = modeKey + (common ? ':common' : ':all') + (noForeign ? ':nf' : '');
+/** 모드와 규칙에 맞는 낱말을 첫 글자별로 묶은 것. 처음 쓸 때 만든다.
+ *  rules: { noForeign, strict(표준어만), injeong(어인정) } */
+function pool(modeKey, common, rules = {}) {
+  if (typeof rules === 'boolean') rules = { noForeign: rules };
+  const { noForeign = false, strict = false, injeong = false } = rules;
+  const key = modeKey + (common ? ':common' : ':all') + (noForeign ? ':nf' : '') + (strict ? ':st' : '') + (injeong ? ':ij' : '');
   let m = POOLS.get(key);
-  if (m) return m;
+  // 묶음 하나가 수 MB 라 최근 쓴 것 몇 개만 들고 있는다(Durable Object 메모리 128MB). 다시 만드는 데는 0.1초 안쪽.
+  if (m) { POOLS.delete(key); POOLS.set(key, m); return m; }
+  while (POOLS.size >= POOL_KEEP) POOLS.delete(POOLS.keys().next().value);
   m = new Map();
   const fits = (MODES[modeKey] || MODES.classic).fits;
   for (const w of common ? COMMON : WORDS) {
-    if (!fits(w) || (noForeign && FOREIGN.has(w))) continue;
+    if (!fits(w) || (noForeign && FOREIGN.has(w)) || (strict && NONSTD.has(w)) || (!injeong && INJEONG.has(w))) continue;
     let a = m.get(w[0]);
     if (!a) m.set(w[0], a = []);
     a.push(w);
@@ -82,7 +87,8 @@ function pool(modeKey, common, noForeign = false) {
   return m;
 }
 /** 이 방 규칙(모드 · 외래어 금지)에 맞는 묶음 */
-const poolFor = (room, common) => pool(room.cfg.mode, common, room.cfg.noForeign);
+const poolFor = (room, common) => pool(room.cfg.mode, common,
+  { noForeign: room.cfg.noForeign, strict: room.cfg.strict, injeong: room.cfg.injeong });
 
 /** 이 글자들로 시작하는, 아직 안 쓴 낱말 */
 function candidates(p, starts, used, limit = Infinity) {
@@ -107,7 +113,7 @@ function hasNext(room, word, used) {
 /** 그 글자로 이을 수 있는 낱말 수 (봇이 상대를 몰아붙일 때 쓴다) */
 const contCache = new Map();
 function contCount(room, c) {
-  const key = room.cfg.mode + (room.cfg.noForeign ? ':nf' : '') + c;
+  const key = [room.cfg.mode, room.cfg.noForeign, room.cfg.strict, room.cfg.injeong, c].join(':');
   let n = contCache.get(key);
   if (n == null) {
     const p = poolFor(room, false);
@@ -187,7 +193,7 @@ function createRoom({ title, priv, mode }) {
     players: [],
     nextId: 1,
     cfg: { mode: MODE_KEYS.includes(mode) ? mode : 'classic', rounds: 5, roundTime: 60,
-           mission: false, manner: false, noForeign: false, botDiff: 'normal' },
+           mission: false, manner: false, noForeign: false, strict: false, injeong: false, botDiff: 'normal' },
     g: null,
     timers: { turn: null, step: null, bot: null },
     lastActive: Date.now(),
@@ -417,9 +423,14 @@ function check(room, word) {
   if (!modeOf(room).fits(word)) return 'len';
   if (!g.starts.includes(word[0])) return 'start';
   if (!WORDS.has(word)) return 'nodict';
+  if (INJEONG.has(word) && !room.cfg.injeong) return 'injeong';
   if (g.used.has(word)) return 'used';
   if (room.cfg.noForeign && FOREIGN.has(word)) return 'foreign';
-  if (room.cfg.manner && !hasNext(room, word, new Set(g.used).add(word))) return 'hanbang';
+  if (room.cfg.strict && NONSTD.has(word)) return 'strict';
+  // 라운드 첫 낱말은 언제나 한방 금지(끄투와 같다). 그 뒤로는 '한방 금지' 방에서만.
+  if ((g.chain === 0 || room.cfg.manner) && !hasNext(room, word, new Set(g.used).add(word))) {
+    return g.chain === 0 && !room.cfg.manner ? 'firstkill' : 'hanbang';
+  }
   return null;
 }
 
@@ -529,7 +540,7 @@ function botPick(room) {
   let cands = [];
   if (B.full < 1) cands = candidates(poolFor(room, true), g.starts, g.used);
   if (!cands.length && Math.random() < B.full) cands = candidates(poolFor(room, false), g.starts, g.used);
-  if (room.cfg.manner) cands = cands.filter(w => hasNext(room, w, new Set(g.used).add(w)));
+  if (room.cfg.manner || g.chain === 0) cands = cands.filter(w => hasNext(room, w, new Set(g.used).add(w)));
   if (!cands.length) return null;
 
   if (room.cfg.botDiff === 'easy') {
@@ -698,6 +709,8 @@ function handle(ws, msg) {
       if (typeof msg.mission === 'boolean') c.mission = msg.mission;
       if (typeof msg.manner === 'boolean') c.manner = msg.manner;
       if (typeof msg.noForeign === 'boolean') c.noForeign = msg.noForeign;
+      if (typeof msg.strict === 'boolean') c.strict = msg.strict;
+      if (typeof msg.injeong === 'boolean') c.injeong = msg.injeong;
       if (typeof msg.priv === 'boolean') room.priv = msg.priv;
       if (typeof msg.title === 'string' && clean(msg.title, 20)) room.title = clean(msg.title, 20);
       pushState(room); listChanged();
@@ -824,5 +837,5 @@ function selfCheck() {
 module.exports = {
   rooms, handle, disconnect, sweepRooms, selfCheck, loadDict, MAX_PLAYERS,
   // 시험용
-  _t: { dueum, startsFrom, scoreOf, check, hasNext, candidates, pool, get WORDS() { return WORDS; }, get FOREIGN() { return FOREIGN; } },
+  _t: { dueum, startsFrom, scoreOf, check, hasNext, candidates, pool, get WORDS() { return WORDS; }, get FOREIGN() { return FOREIGN; }, get NONSTD() { return NONSTD; }, get INJEONG() { return INJEONG; } },
 };

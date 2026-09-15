@@ -260,9 +260,13 @@ check('한방 금지 방에서는 이을 말이 없는 낱말을 받지 않는�
   r.g.starts = [killer[0]];
   r.g.turnId = r.players.find(p => !p.bot).id;
   r.g.stage = 'turn';
+  r.g.chain = 3;
   assert.strictEqual(game._t.check(r, killer), 'hanbang');
   r.cfg.manner = false;
   assert.strictEqual(game._t.check(r, killer), null);
+  // 라운드 첫 낱말은 한방 금지를 끄더라도 안 된다
+  r.g.chain = 0;
+  assert.strictEqual(game._t.check(r, killer), 'firstkill');
   game.handle(h, { t: 'leave' });
 });
 
@@ -285,6 +289,30 @@ check('외래어 금지 방에서는 버스 · 버스표를 받지 않고, 봇�
   const bad = oks.filter(m => game._t.FOREIGN.has(m.word));
   assert.deepStrictEqual(bad.map(m => m.word), []);
   console.log(`      외래어 금지 어려움 봇: ${oks.slice(0, 8).map(m => m.word).join(' → ')}`);
+  game.handle(h, { t: 'leave' });
+});
+
+check('표준어만 · 어인정 — 방언 · 띄어 쓰는 말은 표준어만에서 막고, 어인정 낱말은 켠 방에서만', () => {
+  const h = sock();
+  game.handle(h, { t: 'create', name: '규칙', bots: 1 });
+  const r = game.rooms.get(last(h, m => m.t === 'welcome').code);
+  game.handle(h, { t: 'start' });
+  advance(3700);
+  r.g.chain = 2;
+  const nonstd = [...game._t.NONSTD].find(w => w.length >= 3 && !game._t.FOREIGN.has(w) && game._t.hasNext(r, w, r.g.used));
+  r.g.starts = [nonstd[0]];
+  assert.strictEqual(game._t.check(r, nonstd), null, '기본 방에서 ' + nonstd + ' 가 안 됨');
+  r.cfg.strict = true;
+  assert.strictEqual(game._t.check(r, nonstd), 'strict');
+  r.cfg.strict = false;
+  assert.ok(game._t.WORDS.has('치과기공사') && game._t.NONSTD.has('치과기공사'), '띄어 쓰는 구 치과기공사');
+  if (game._t.INJEONG.size) {
+    const ij = [...game._t.INJEONG].find(w => game._t.hasNext(r, w, r.g.used));
+    r.g.starts = [ij[0]];
+    assert.strictEqual(game._t.check(r, ij), 'injeong');
+    r.cfg.injeong = true;
+    assert.strictEqual(game._t.check(r, ij), null);
+  }
   game.handle(h, { t: 'leave' });
 });
 
