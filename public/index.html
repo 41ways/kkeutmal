@@ -13,8 +13,26 @@
 </head>
 <body>
 
-<!-- ───────────── 첫 화면 ───────────── -->
-<section id="scMain" class="screen">
+<!-- ───────────── 시작 화면 ───────────── -->
+<section id="scTitle" class="screen title-screen">
+  <div class="title-wrap">
+    <h1 class="logo big" aria-label="끝말잇기"><span>끝</span><span>말</span><span>잇</span><span>기</span></h1>
+    <p class="title-sub">앞 낱말의 끝 글자를 이어 가는 말놀이</p>
+    <div class="demo" aria-hidden="true">
+      <div id="demoSheet" class="demo-sheet"></div>
+      <p id="demoNote" class="demo-note"></p>
+    </div>
+    <button id="btnEnter" class="btn primary enter">게임 시작 <small>Enter</small></button>
+    <ul class="title-feats">
+      <li>표준국어대사전 21만 낱말</li><li>두음 법칙</li><li>1~8인 · 봇</li><li>쿵쿵따</li>
+    </ul>
+    <p id="titleOnline" class="title-meta"></p>
+  </div>
+</section>
+
+<!-- ───────────── 첫 화면 (이름 · 방 목록) ───────────── -->
+<section id="scMain" class="screen" hidden>
+  <button id="btnHome" class="btn ghost small home">← 처음으로</button>
   <header class="brand">
     <h1 class="logo" aria-label="끝말잇기"><span>끝</span><span>말</span><span>잇</span><span>기</span></h1>
     <p class="sub">표준국어대사전 <b id="wordCount">21만</b> 낱말로 잇는 온라인 끝말잇기</p>

@@ -3,6 +3,8 @@
 
 const $ = s => document.querySelector(s);
 const el = {
+  scTitle: $('#scTitle'), btnEnter: $('#btnEnter'), btnHome: $('#btnHome'),
+  demoSheet: $('#demoSheet'), demoNote: $('#demoNote'), titleOnline: $('#titleOnline'),
   scMain: $('#scMain'), scRoom: $('#scRoom'), scGame: $('#scGame'),
   inName: $('#inName'), inCode: $('#inCode'), joinForm: $('#joinForm'),
   btnQuick: $('#btnQuick'), btnCreate: $('#btnCreate'), btnSolo: $('#btnSolo'),
@@ -56,7 +58,7 @@ function toast(msg, ms = 2600) {
 }
 
 function show(which) {
-  for (const k of ['scMain', 'scRoom', 'scGame']) el[k].hidden = k !== which;
+  for (const k of ['scTitle', 'scMain', 'scRoom', 'scGame']) el[k].hidden = k !== which;
 }
 
 /* ───────────── 소리 (기본은 끔) ───────────── */
@@ -247,6 +249,7 @@ el.joinForm.onsubmit = e => {
 
 function renderRooms(m) {
   el.online.textContent = `${m.online}명 접속 중`;
+  el.titleOnline.textContent = `지금 ${m.online}명 접속 · 열린 방 ${m.list.length}개`;
   el.roomEmpty.hidden = m.list.length > 0;
   el.roomList.innerHTML = m.list.map(r => `
     <li data-code="${r.code}" class="${r.phase === 'playing' ? 'playing' : ''}">
@@ -656,12 +659,52 @@ el.scGame.addEventListener('click', e => {
   if (!getSelection().toString()) el.entry.focus();
 });
 
+/* ───────────── 시작 화면 ───────────── */
+/* 낱말이 원고지 칸에 한 글자씩 이어지는 시연. 앞 낱말의 끝 글자(빨간 칸)에서 다음 낱말이 자란다. */
+const DEMO = ['끝말', '말놀이', '이야기', '기차', '차례', '예술', '술래', '내일', '일기', '기억', '억새',
+  '새벽', '벽돌', '돌잔치', '치약', '약속', '속담', '담력', '역사', '사과', '과자', '자두', '두부'];
+let demoI = 0, demoT = null;
+function demoStep() {
+  const word = DEMO[demoI], prev = demoI ? DEMO[demoI - 1] : null;
+  const carried = prev && prev[prev.length - 1] !== word[0];          // 두음 법칙으로 바뀐 글자
+  el.demoSheet.classList.remove('out');
+  el.demoSheet.innerHTML = [...word].map((c, i) =>
+    `<span class="cell ${i === 0 && prev ? 'carry' : 'in'}" style="animation-delay:${i * 120}ms">${c}</span>`).join('');
+  el.demoNote.innerHTML = prev
+    ? `${prev} → <b>${word}</b>` + (carried ? `<span class="dueum">두음 법칙 ${prev[prev.length - 1]}→${word[0]}</span>` : '')
+    : '&nbsp;';
+  // 잠깐 뒤 끝 글자만 남기고 걷어 낸다
+  demoT = setTimeout(() => {
+    const cells = el.demoSheet.children;
+    if (cells.length) cells[cells.length - 1].classList.add('last');
+    el.demoSheet.classList.add('out');
+    demoI = (demoI + 1) % DEMO.length;
+    demoT = setTimeout(() => { if (!el.scTitle.hidden) demoStep(); else demoT = null; }, 420);
+  }, 1500 + word.length * 120);
+}
+function showTitle() {
+  show('scTitle');
+  if (!demoT) demoStep();
+  el.btnEnter.focus();
+}
+function enterMain() {
+  show('scMain');
+  if (!nameOf()) el.inName.focus();
+}
+el.btnEnter.onclick = enterMain;
+el.btnHome.onclick = showTitle;
+addEventListener('keydown', e => {
+  if (el.scTitle.hidden || e.target.closest('input')) return;
+  if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); enterMain(); }
+});
+
 /* ───────────── 시작 ───────────── */
 const hashCode = location.hash.replace('#', '').trim().toUpperCase();
 if (saved()) {
   reconnect();
 } else {
-  show('scMain');
+  // 초대 링크(#코드)로 왔으면 시작 화면을 건너뛴다
+  if (/^[A-Z0-9]{4}$/.test(hashCode)) show('scMain'); else showTitle();
   connect(() => send({ t: 'rooms' }));
   if (/^[A-Z0-9]{4}$/.test(hashCode)) {
     el.inCode.value = hashCode;
