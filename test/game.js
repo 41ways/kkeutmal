@@ -178,7 +178,7 @@ check('봇 셋이 끝까지 한 판 (모든 낱말이 규칙에 맞는지)', () 
       // 사람은 차례에서 빠지게 한다 (연결이 없는 사람은 판에 끼지 않는다). 소식은 그대로 받는다.
       r.players.find(p => !p.bot).connected = false;
       game.handle(h, { t: 'start' });
-      advance(60_000 * 5);
+      advance(60_000 * 8);             // 4라운드 × 60초 + 라운드 알림 · 낱말 사이 대기
       assert.strictEqual(r.phase, 'lobby', `${diff}/${mode} 판이 안 끝났다`);
       const oks = evs(h, 'ok');
       // 어려움 봇은 한방 단어로 서로를 금방 끝낸다. 그래도 라운드 첫 차례는 반드시 내므로 라운드 수만큼은 나온다.
