@@ -136,7 +136,7 @@ const CFG_CHOICES = {
 
 const BOT = {
   easy:   { think: [2200, 4200], perChar: 180, miss: 0.12, full: 0.15 },
-  normal: { think: [1300, 2600], perChar: 110, miss: 0.04, full: 0.6 },
+  normal: { think: [1300, 2600], perChar: 110, miss: 0.02, full: 0.6 },
   hard:   { think: [ 600, 1400], perChar:  60, miss: 0.01, full: 1 },
 };
 const BOT_NAMES = ['말똥이', '글벗', '낱말이', '또박이', '사전이', '한방이', '끝순이'];
@@ -338,7 +338,7 @@ function startGame(room) {
   const order = room.players.filter(p => p.bot || p.connected);
   for (const p of room.players) {
     p.inGame = order.includes(p);
-    p.score = 0; p.words = 0; p.best = null; p.longest = '';
+    p.score = 0; p.words = 0; p.best = null; p.longest = ''; p.missed = false;
   }
   room.phase = 'playing';
   room.last = null;
@@ -551,7 +551,13 @@ function botPick(room) {
 function scheduleBot(room, p) {
   const g = room.g;
   const B = BOT[room.cfg.botDiff] || BOT.normal;
-  const word = Math.random() < B.miss ? null : botPick(room);   // 생각이 안 나거나 이을 말이 없다
+  // 가끔 생각이 안 난다. 다만 라운드 첫 차례이거나 바로 앞 차례에 못 냈으면 빠지지 않는다 —
+  // 진 사람이 다음 라운드를 시작하므로, 그렇지 않으면 한 번 못 낸 봇이 라운드마다 연달아 시간 초과로 보였다.
+  const mayMiss = g.chain > 0 && !p.missed;
+  let word = null;
+  try { word = mayMiss && Math.random() < B.miss ? null : botPick(room); }
+  catch (err) { console.error('봇 낱말 고르기 실패', err); }
+  p.missed = !word;
   if (!word) {
     // 시간이 흐르는 방이면 다 가길 기다린다. 시간제한이 없으면 잠깐 고민하다 포기한다.
     if (!g.turnLimit) {
@@ -561,10 +567,13 @@ function scheduleBot(room, p) {
     return;
   }
   const delay = rnd(B.think[0], B.think[1]) + word.length * B.perChar;
-  if (g.turnLimit && delay >= g.turnLimit - 80) return;          // 늦는다
+  if (g.turnLimit && delay >= g.turnLimit - 80) { p.missed = true; return; }   // 늦는다
   room.timers.bot = setTimeout(() => {
     room.timers.bot = null;
-    if (room.g === g && g.stage === 'turn' && g.turnId === p.id) tryWord(room, p, word);
+    if (room.g !== g || g.stage !== 'turn' || g.turnId !== p.id) return;
+    // 고른 뒤 판이 바뀌어 안 되는 말이 됐으면 그 자리에서 다시 고른다 — 조용히 시간만 흘려보내지 않게
+    const w = check(room, word) ? botPick(room) : word;
+    if (w) tryWord(room, p, w);
   }, delay);
 }
 

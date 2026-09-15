@@ -181,7 +181,8 @@ check('봇 셋이 끝까지 한 판 (모든 낱말이 규칙에 맞는지)', () 
       advance(60_000 * 5);
       assert.strictEqual(r.phase, 'lobby', `${diff}/${mode} 판이 안 끝났다`);
       const oks = evs(h, 'ok');
-      assert.ok(oks.length > 5, `${diff}/${mode} 낱말이 너무 적다: ${oks.length}`);
+      // 어려움 봇은 한방 단어로 서로를 금방 끝낸다. 그래도 라운드 첫 차례는 반드시 내므로 라운드 수만큼은 나온다.
+      assert.ok(oks.length >= (diff === 'hard' ? 4 : 6), `${diff}/${mode} 낱말이 너무 적다: ${oks.length}`);
       let prev = null;
       const seen = new Set();
       for (const m of h.inbox) {
@@ -199,6 +200,46 @@ check('봇 셋이 끝까지 한 판 (모든 낱말이 규칙에 맞는지)', () 
       assert.ok(!game.rooms.has(r.code), '사람이 다 나간 방이 남았다');
     }
   }
+});
+
+check('봇은 라운드 첫 차례와, 앞 차례를 못 낸 바로 다음 차례엔 빠지지 않는다 (사람 2 · 봇 1 · 한방 금지)', () => {
+  let firstFails = 0, twice = 0, botTurns = 0;
+  for (let rep = 0; rep < 25; rep++) {
+    const x = sock(), y = sock();
+    game.handle(x, { t: 'create', name: 'x' });
+    const c = last(x, m => m.t === 'welcome').code;
+    game.handle(y, { t: 'join', code: c, name: 'y' });
+    game.handle(x, { t: 'addBot' });
+    const r = game.rooms.get(c);
+    const bot = r.players.find(p => p.bot);
+    game.handle(x, { t: 'cfg', manner: true, rounds: 5, roundTime: 60 });
+    game.handle(x, { t: 'start' });
+    // 사람 둘은 흔한 낱말로 곧바로 답한다
+    let prevBotFailed = false, chainAtTurn = null, seen = null;
+    for (let i = 0; i < 6000 && r.phase === 'playing'; i++) {
+      const g = r.g;
+      if (g && g.stage === 'turn' && g.turnStart !== seen) {
+        seen = g.turnStart;
+        if (g.turnId === bot.id) { botTurns++; chainAtTurn = g.chain; }
+        else {
+          const w = game._t.candidates(game._t.pool('classic', true), g.starts, g.used).find(v => game._t.check(r, v) === null);
+          if (w) game.handle(g.turnId === 1 ? x : y, { t: 'say', text: w });
+        }
+      }
+      const before = evs(x, 'fail').length;
+      advance(100);
+      const f = evs(x, 'fail').slice(before).find(m => m.by === bot.id);
+      if (f && r.g) {
+        if (chainAtTurn === 0) firstFails++;
+        if (prevBotFailed) twice++;
+      }
+      if (evs(x, 'ok').slice(-1)[0]?.by === bot.id) prevBotFailed = false;
+      if (f) prevBotFailed = true;
+    }
+    game.handle(x, { t: 'leave' }); game.handle(y, { t: 'leave' });
+  }
+  assert.ok(botTurns > 50, '봇 차례가 너무 적다: ' + botTurns);
+  assert.strictEqual(firstFails, 0, '라운드 첫 차례에 봇이 시간 초과');
 });
 
 check('한방 금지 방에서는 이을 말이 없는 낱말을 받지 않는다', () => {
