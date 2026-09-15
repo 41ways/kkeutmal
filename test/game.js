@@ -86,7 +86,7 @@ check('시작하면 라운드 알림 뒤 첫 차례가 열린다', () => {
   game.handle(a, { t: 'start' });
   assert.strictEqual(room.phase, 'playing');
   assert.strictEqual(evs(a, 'round').length, 1);
-  advance(2000);
+  advance(3700);
   assert.strictEqual(room.g.stage, 'turn');
   assert.strictEqual(room.g.roundWord.length, 3);
 });
@@ -248,7 +248,7 @@ check('한방 금지 방에서는 이을 말이 없는 낱말을 받지 않는�
   const r = game.rooms.get(last(h, m => m.t === 'welcome').code);
   game.handle(h, { t: 'cfg', manner: true });
   game.handle(h, { t: 'start' });
-  advance(2000);
+  advance(3700);
   // '늄'으로 끝나는 말은 이을 말이 거의 없다 — 사전에서 한방 단어 하나를 찾아 시작 글자를 맞춘다
   const all = game._t.pool('classic', false);
   let killer = null;
@@ -273,7 +273,7 @@ check('외래어 금지 방에서는 버스 · 버스표를 받지 않고, 봇�
   game.handle(h, { t: 'cfg', noForeign: true, botDiff: 'hard', rounds: 3 });
   r.players.find(p => !p.bot).connected = false;
   game.handle(h, { t: 'start' });
-  advance(2000);
+  advance(3700);
   r.g.starts = ['버'];
   assert.strictEqual(game._t.check(r, '버스'), 'foreign');
   assert.strictEqual(game._t.check(r, '버스표'), 'foreign');
@@ -297,7 +297,7 @@ check('시간제한 없음 — 시계가 안 가고, 포기하면 −50 · 다�
   game.handle(x, { t: 'cfg', roundTime: 0, rounds: 3 });
   assert.strictEqual(r.cfg.roundTime, 0);
   game.handle(x, { t: 'start' });
-  advance(2000);
+  advance(3700);
   const cur = r.g.turnId;
   assert.strictEqual(r.g.turnLimit, 0);
   advance(5 * 60_000);                                   // 5분을 기다려도
@@ -314,7 +314,7 @@ check('시간제한 없음 — 시계가 안 가고, 포기하면 −50 · 다�
   advance(2700);
   assert.strictEqual(r.g.round, 2);
   // 차례인 사람이 끊기면 잠깐 뒤 넘어간다
-  advance(2000);
+  advance(3700);
   const who = r.g.turnId;
   game.disconnect(who === 1 ? x : y);
   advance(9000);
@@ -343,7 +343,7 @@ check('판 중에 차례인 사람이 나가면 다음 사람에게 넘어간다
   game.handle(z, { t: 'join', code: c, name: 'z' });
   const r = game.rooms.get(c);
   game.handle(x, { t: 'start' });
-  advance(2000);
+  advance(3700);
   const cur = r.g.turnId;
   const s = [x, y, z][cur - 1];
   game.handle(s, { t: 'leave' });

@@ -24,7 +24,7 @@
     </div>
     <button id="btnEnter" class="btn primary enter">게임 시작 <small>Enter</small></button>
     <ul class="title-feats">
-      <li>표준국어대사전 21만 낱말</li><li>두음 법칙</li><li>1~8인 · 봇</li><li>쿵쿵따</li>
+      <li>32만 낱말</li><li>두음 법칙</li><li>1~8인 · 봇</li><li>쿵쿵따</li>
     </ul>
     <p id="titleOnline" class="title-meta"></p>
   </div>
@@ -35,7 +35,7 @@
   <button id="btnHome" class="btn ghost small home">← 처음으로</button>
   <header class="brand">
     <h1 class="logo" aria-label="끝말잇기"><span>끝</span><span>말</span><span>잇</span><span>기</span></h1>
-    <p class="sub">표준국어대사전 <b id="wordCount">21만</b> 낱말로 잇는 온라인 끝말잇기</p>
+    <p class="sub"><b id="wordCount">32만</b> 낱말로 잇는 온라인 끝말잇기</p>
   </header>
 
   <div class="main-grid">
@@ -171,10 +171,14 @@
       <div class="tbar turn"><span class="lbl">차례</span><div class="track"><i id="turnFill"></i></div><b id="turnSec"></b></div>
     </div>
     <div id="board" class="board">
+      <!-- 앞 사람 낱말은 위에 작게, 내가 이어야 할 글자는 가운데 크게 -->
+      <div class="prev">
+        <div id="prevSheet" class="prev-sheet"></div>
+        <p id="by" class="by"></p>
+        <p id="def" class="def"></p>
+      </div>
       <div id="sheet" class="sheet"></div>
-      <p id="by" class="by"></p>
-      <p id="def" class="def"></p>
-      <p id="attempt" class="attempt"></p>
+      <div id="attempt" class="bad-pop" hidden></div>
       <div id="stamp" class="stamp" hidden></div>
     </div>
     <ol id="chain" class="chain"></ol>
@@ -206,6 +210,13 @@
     </div>
   </form>
 </dialog>
+
+<!-- 판 시작 — 제시어가 가운데 크게 떴다가 위 제시어 자리로 들어간다 -->
+<div id="rwIntro" class="rw-intro" hidden aria-hidden="true">
+  <p class="rw-lbl">제시어</p>
+  <div id="rwCells" class="rw-cells"></div>
+  <p id="rwSub" class="rw-sub"></p>
+</div>
 
 <div id="toast" class="toast" hidden></div>
 

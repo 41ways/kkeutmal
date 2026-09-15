@@ -16,7 +16,8 @@ const el = {
   chatLobby: $('#chatLobby'), chatGame: $('#chatGame'),
   roundWord: $('#roundWord'), roundNo: $('#roundNo'), mission: $('#mission'), btnStop: $('#btnStop'), btnSound: $('#btnSound'),
   roundFill: $('#roundFill'), roundSec: $('#roundSec'), turnFill: $('#turnFill'), turnSec: $('#turnSec'),
-  board: $('#board'), sheet: $('#sheet'), by: $('#by'), def: $('#def'), attempt: $('#attempt'), stamp: $('#stamp'),
+  board: $('#board'), sheet: $('#sheet'), prevSheet: $('#prevSheet'), by: $('#by'), def: $('#def'), attempt: $('#attempt'), stamp: $('#stamp'),
+  rwIntro: $('#rwIntro'), rwCells: $('#rwCells'), rwSub: $('#rwSub'),
   chain: $('#chain'), players: $('#players'),
   timers: $('.timers'), roundBar: $('.tbar.round'), turnBar: $('.tbar.turn'),
   entryForm: $('#entryForm'), entry: $('#entry'), entryTag: $('#entryTag'), btnGiveup: $('#btnGiveup'),
@@ -383,9 +384,10 @@ function renderGame(prev) {
   el.chain.scrollLeft = el.chain.scrollWidth;
 
   // 판 — 방금 들어온 낱말은 이벤트에서 그린다. 여기서는 새로 붙었을 때(새로고침 등) 채운다.
-  if (g.stage === 'intro') drawIntro();
+  if (g.stage === 'intro') { if (!prev || !prev.g || prev.g.stage !== 'intro' || prev.g.round !== g.round) drawIntro(); }
   else if (sheetWord === null || sheetWord !== (g.lastWord || '')) drawSheet(g.lastWord, false);
   else drawNext();
+  if (introPending && g.round === 1 && g.stage === 'intro') { introPending = false; requestAnimationFrame(() => playRoundWordIntro(g)); }
 
   // 내 차례 알림
   const myTurn = g.stage === 'turn' && g.turnId === me;
@@ -406,38 +408,88 @@ function startsLabel(starts) {
   return starts.map(c => `‘${c}’`).join(' 또는 ') + ro(last);
 }
 
-/** 원고지 칸에 낱말을 앉히고, 이어 칠 글자를 점선 칸으로 */
+/** 앞 사람 낱말은 위에 작은 원고지 칸으로, 이어야 할 글자는 가운데 큰 칸으로 */
 function drawSheet(word, animate) {
   sheetWord = word || '';
-  const cells = [...(word || '')].map((c, i) =>
-    `<span class="cell ${animate ? 'in' : ''} ${i === word.length - 1 ? 'tail' : ''}" style="animation-delay:${i * 45}ms">${esc(c)}</span>`);
-  // 방금 받아들여진 낱말이면 이어 칠 글자는 뒤따라 오는 상태가 채운다 (지금 S 는 아직 앞 차례의 것)
-  el.sheet.innerHTML = cells.join('') + (animate ? '' : nextCell());
-  el.sheet.style.setProperty('--n', Math.max(4, (word || '').length + 2));
+  el.prevSheet.innerHTML = [...(word || '')].map((c, i) =>
+    `<span class="cell ${animate ? 'in' : ''} ${i === word.length - 1 ? 'tail' : ''}" style="animation-delay:${i * 40}ms">${esc(c)}</span>`).join('');
+  el.prevSheet.style.setProperty('--n', Math.max(5, (word || '').length));
+  // 방금 받아들여진 낱말이면 가운데 글자는 뒤따라 오는 상태가 채운다 (지금 S 는 아직 앞 차례의 것)
+  if (animate) el.sheet.innerHTML = '';
+  else drawNext(false);
   if (!word) { el.by.innerHTML = ''; el.def.innerHTML = ''; }
 }
-function nextCell() {
+let nextShown = '';
+function drawNext(animate = true) {
   const g = S && S.g;
-  if (!g || !g.starts || !g.starts.length || g.stage === 'intro') return '';
-  const alt = g.starts[1] ? `<small>또는 ‘${esc(g.starts[1])}’</small>` : '';
-  return `<span class="cell next">${esc(g.starts[0])}${alt}</span>`;
-}
-function drawNext() {
-  const old = el.sheet.querySelector('.cell.next');
-  const html = nextCell();
-  if (old) old.outerHTML = html || '';
-  else if (html) el.sheet.insertAdjacentHTML('beforeend', html);
+  if (!g || !g.starts || !g.starts.length || g.stage === 'intro') { el.sheet.innerHTML = ''; nextShown = ''; return; }
+  const key = g.starts.join(',');
+  el.sheet.classList.toggle('wait', g.stage === 'fail');
+  if (key === nextShown && el.sheet.firstElementChild) return;     // 같은 글자면 다시 그리지 않는다(숨쉬는 움직임이 끊기지 않게)
+  nextShown = key;
+  const alt = g.starts[1] ? `<small class="alt">또는 ‘${esc(g.starts[1])}’</small>` : '';
+  el.sheet.innerHTML = `<span class="cell big-next ${animate ? 'in' : ''}">${esc(g.starts[0])}${alt}</span>`;
 }
 function drawIntro() {
   const g = S.g;
-  sheetWord = null;
-  el.sheet.innerHTML = '';
-  el.sheet.style.setProperty('--n', 4);
+  sheetWord = null; nextShown = '';
+  el.prevSheet.innerHTML = '';
+  el.sheet.classList.remove('wait');
   el.sheet.innerHTML = `<div class="intro"><span class="lbl">${g.round}라운드</span>
-    <div style="display:flex"><span class="cell in">${esc(g.roundWord[g.round - 1])}</span></div></div>`;
+    <span class="cell big-next in">${esc(g.roundWord[g.round - 1])}</span></div>`;
   el.by.innerHTML = `<b>${esc(nameById(g.turnId))}</b>부터 시작`;
   el.def.innerHTML = '';
-  el.attempt.textContent = '';
+}
+
+/** 틀린 낱말 — 판 한가운데에 크게, 모두에게 */
+let badT = null;
+function showBad(m) {
+  const b = el.attempt;
+  b.innerHTML = `<span class="w">${esc(m.word)}</span><span class="why">✗ ${WHY[m.why] || '안 됨'}</span>` +
+    `<span class="who">${m.by === me ? '내가 친 말' : esc(nameById(m.by))}</span>`;
+  b.hidden = false;
+  b.classList.remove('show', 'hide'); void b.offsetWidth; b.classList.add('show');
+  clearTimeout(badT);
+  badT = setTimeout(() => { b.classList.add('hide'); badT = setTimeout(() => { b.hidden = true; }, 320); }, 1500);
+}
+function hideBad() { clearTimeout(badT); el.attempt.hidden = true; }
+
+/** 판 시작 — 제시어를 가운데 크게 띄웠다가 줄이며 위 제시어 칸 자리로 넣는다 (서버는 그동안 3.6초 기다린다) */
+function playRoundWordIntro(g) {
+  const word = g.roundWord;
+  el.rwCells.style.setProperty('--n', word.length);
+  el.rwCells.innerHTML = [...word].map((c, i) =>
+    `<span class="cell in ${i === 0 ? 'first' : ''}" style="animation-delay:${120 + i * 110}ms">${esc(c)}</span>`).join('');
+  el.rwSub.textContent = `${word.length}라운드 — 라운드마다 이 글자로 시작`;
+  el.rwIntro.hidden = false;
+  el.rwIntro.style.opacity = '';
+  el.roundWord.classList.add('waiting');
+  el.roundWord.classList.remove('landed');
+  const land = () => {
+    const targets = [...el.roundWord.children];
+    const cells = [...el.rwCells.children];
+    const motions = cells.map((cell, i) => {
+      const t = targets[i];
+      if (!t || !cell.animate) return null;
+      const a = cell.getBoundingClientRect(), b = t.getBoundingClientRect();
+      const dx = (b.left + b.width / 2) - (a.left + a.width / 2), dy = (b.top + b.height / 2) - (a.top + a.height / 2);
+      return cell.animate([{ transform: 'none' }, { transform: `translate(${dx}px, ${dy}px) scale(${b.width / a.width})` }],
+        { duration: 650, easing: 'cubic-bezier(.6, 0, .25, 1)', fill: 'forwards', delay: i * 40 });
+    });
+    el.rwIntro.animate([{ backgroundColor: 'rgba(251, 248, 241, .94)' }, { backgroundColor: 'rgba(251, 248, 241, 0)' }],
+      { duration: 650, fill: 'forwards' });
+    for (const x of el.rwIntro.querySelectorAll('.rw-lbl, .rw-sub')) x.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 250, fill: 'forwards' });
+    const done = () => {
+      el.rwIntro.hidden = true;
+      el.rwIntro.getAnimations({ subtree: true }).forEach(x => x.cancel());
+      el.roundWord.classList.remove('waiting');
+      el.roundWord.classList.add('landed');
+    };
+    const last = motions.filter(Boolean).pop();
+    if (last) last.finished.then(done, done); else done();
+  };
+  clearTimeout(playRoundWordIntro.t);
+  playRoundWordIntro.t = setTimeout(land, 1500 + word.length * 110);
 }
 
 function showStamp(text, cls, ms = 1400) {
@@ -458,12 +510,14 @@ function popPts(id, pts) {
 }
 
 let defReq = 0;
+let introPending = false;     // 판이 막 시작했다 — 첫 상태에서 제시어를 가운데 크게
 let restored = null;          // 틀려서 입력칸에 되돌려 둔 낱말
 function onEvent(m) {
   switch (m.kind) {
     case 'round':
       beep('round');
-      el.attempt.textContent = '';
+      hideBad();
+      if (m.round === 1) introPending = true;       // 판 시작 — 상태가 오면 제시어 연출
       break;
 
     case 'ok': {
@@ -473,7 +527,7 @@ function onEvent(m) {
       el.by.innerHTML = `<b>${esc(nameById(m.by))}</b> <span class="pts">+${m.pts}</span>` +
         (m.chain > 1 ? ` · ${m.chain}번째 이음` : '');
       el.def.innerHTML = '';
-      el.attempt.textContent = '';
+      hideBad();
       const req = ++defReq;
       defOf(m.word).then(d => { if (req === defReq) el.def.innerHTML = defHtml(d); });
       requestAnimationFrame(() => popPts(m.by, m.pts));
@@ -484,8 +538,7 @@ function onEvent(m) {
     }
 
     case 'bad': {
-      el.attempt.textContent = `✗ ${m.word} — ${WHY[m.why] || '안 됨'}`;
-      el.attempt.classList.remove('shake'); void el.attempt.offsetWidth; el.attempt.classList.add('shake');
+      showBad(m);
       if (m.by === me) {
         beep('bad');
         // 친 말을 되돌려 고쳐 칠 수 있게
@@ -504,9 +557,8 @@ function onEvent(m) {
       showStamp(FAIL_STAMP[m.why] || '시간 초과', 'fail', 2400);
       el.by.innerHTML = `<b>${esc(who)}</b> <span class="pts">−${m.penalty}</span>`;
       el.def.innerHTML = m.hint ? `이런 말이 있었음 → <b>${esc(m.hint)}</b>` : '이을 말이 사전에 없었음';
-      el.attempt.textContent = '';
+      hideBad();
       requestAnimationFrame(() => popPts(m.by, -m.penalty));
-      drawNext();
       addSys(`${esc(who)} ${FAIL_LINE[m.why] || '시간 초과'} −${m.penalty}`, 'bad', true);
       break;
     }
@@ -624,6 +676,7 @@ function syncEntry() {
   const playing = g && p && p.inGame;
   const myTurn = playing && (g.stage === 'turn' || g.stage === 'gap') && g.turnId === me;
   el.entryForm.classList.toggle('myturn', !!myTurn);
+  el.board.classList.toggle('mine', !!(myTurn && g.stage === 'turn'));
   el.btnGiveup.hidden = !(myTurn && g.stage === 'turn');
   el.entryTag.textContent = myTurn ? '낱말' : '채팅';
   el.entry.placeholder = myTurn

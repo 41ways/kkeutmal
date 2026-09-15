@@ -124,6 +124,7 @@ const FAIL_PENALTY = 50;
 const GAP_MS = 450;            // 낱말이 받아들여지고 다음 차례가 열리기까지 (시계는 멈춘다)
 const FAIL_PAUSE = 2600;       // 시간 초과 뒤 다음 라운드까지
 const INTRO_MS = 1800;         // 라운드 시작 알림
+const GAME_INTRO_MS = 3600;    // 판 첫 라운드 — 화면이 제시어를 가운데 크게 띄웠다가 제자리로 넣는 동안
 const DOOMED_MS = 5000;        // 이을 말이 사전에 없는 차례는 이만큼만 기다린다
 const DC_MS = 8000;            // 시간제한 없는 방에서 연결이 끊긴 사람 차례는 이만큼 뒤에 넘긴다
 const LOBBY_GRACE = 20_000;    // 대기실에서 끊긴 자리를 비우기까지 (새로고침은 이 안에 돌아온다)
@@ -369,7 +370,7 @@ function beginRound(room, firstId) {
   g.turnStart = 0; g.turnLimit = 0;
   ev(room, { kind: 'round', round: g.round, ch: g.roundWord[g.round - 1], by: firstId });
   pushState(room);
-  room.timers.step = setTimeout(() => beginTurn(room, firstId), INTRO_MS);
+  room.timers.step = setTimeout(() => beginTurn(room, firstId), g.round === 1 ? GAME_INTRO_MS : INTRO_MS);
 }
 
 /** 이번 차례 시간 (ms). 0 이면 제한 없음. */
