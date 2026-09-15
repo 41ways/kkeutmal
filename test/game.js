@@ -398,6 +398,29 @@ check('판 중에 들어온 사람은 구경하다가 다음 판부터', () => {
   game.handle(x, { t: 'leave' }); game.handle(y, { t: 'leave' });
 });
 
+check('방장 넘기기 — 방장만, 사람에게만, 판 중에도', () => {
+  const x = sock(), y = sock();
+  game.handle(x, { t: 'create', name: 'x', bots: 1 });
+  const c = last(x, m => m.t === 'welcome').code;
+  game.handle(y, { t: 'join', code: c, name: 'y' });
+  const r = game.rooms.get(c);
+  const yId = last(y, m => m.t === 'welcome').you, botId = r.players.find(p => p.bot).id;
+  game.handle(y, { t: 'host', id: yId });                  // 방장이 아니면 무시
+  assert.strictEqual(r.hostId, 1);
+  game.handle(x, { t: 'host', id: botId });                // 봇에게는 안 넘어간다
+  assert.strictEqual(r.hostId, 1);
+  game.handle(x, { t: 'host', id: yId });
+  assert.strictEqual(r.hostId, yId);
+  assert.strictEqual(last(x, m => m.t === 'ev' && m.kind === 'host').to, yId);
+  game.handle(x, { t: 'start' });                          // 이제 x 는 시작 못 한다
+  assert.strictEqual(r.phase, 'lobby');
+  game.handle(y, { t: 'start' });
+  assert.strictEqual(r.phase, 'playing');
+  game.handle(y, { t: 'host', id: 1 });                    // 판 중에도 넘길 수 있다
+  assert.strictEqual(r.hostId, 1);
+  game.handle(x, { t: 'leave' }); game.handle(y, { t: 'leave' });
+});
+
 check('빠른 입장은 기다리는 방으로, 없으면 새 방', () => {
   const x = sock(), y = sock();
   game.handle(x, { t: 'quick', name: 'x' });

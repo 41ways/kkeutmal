@@ -688,6 +688,18 @@ function handle(ws, msg) {
       pushState(room);
       break;
 
+    // 방장 넘기기 — 사람에게만. 판 중에도 된다(판 접기 · 한 판 더를 누를 사람이 바뀐다).
+    case 'host': {
+      if (!isHost) return;
+      const target = room.players.find(p => p.id === msg.id && p.id !== me.id && !p.bot);
+      if (!target) return;
+      if (!target.connected) return send(ws, { t: 'err', msg: '연결이 끊긴 사람에게는 넘길 수 없어요.' });
+      room.hostId = target.id;
+      ev(room, { kind: 'host', by: me.id, to: target.id, from: me.name, name: target.name });
+      pushState(room); listChanged();
+      break;
+    }
+
     case 'kick': {
       if (!isHost || !lobby) return;
       const target = room.players.find(p => p.id === msg.id && p.id !== me.id);

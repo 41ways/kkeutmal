@@ -301,7 +301,9 @@ function renderRoom() {
     const cls = ['slot', p.id === S.hostId ? 'host' : '', p.id === me ? 'me' : '', p.connected ? '' : 'off'].join(' ');
     const badge = p.id === S.hostId ? '방장' : p.bot ? '봇' : '';
     const x = host && p.id !== me ? `<button class="x" data-kick="${p.id}" title="${p.bot ? '봇 빼기' : '내보내기'}">×</button>` : '';
-    slots.push(`<li class="${cls}"><span class="badge">${badge}</span>${x}
+    const give = host && p.id !== me && !p.bot && p.connected
+      ? `<button class="give" data-host="${p.id}" title="${esc(p.name)}에게 방장 넘기기">방장 넘기기</button>` : '';
+    slots.push(`<li class="${cls}"><span class="badge">${badge}</span>${x}${give}
       <span class="face">${esc(p.name.slice(0, 1))}</span><span class="nm">${esc(p.name)}</span></li>`);
   }
   el.slots.innerHTML = slots.join('');
@@ -335,6 +337,12 @@ function renderRoom() {
 el.slots.addEventListener('click', e => {
   const k = e.target.closest('[data-kick]');
   if (k) { send({ t: 'kick', id: Number(k.dataset.kick) }); return; }
+  const h = e.target.closest('[data-host]');
+  if (h) {
+    const id = Number(h.dataset.host);
+    if (confirm(`${nameById(id)}에게 방장을 넘길까요? 설정 · 시작은 그 사람이 하게 됩니다.`)) send({ t: 'host', id });
+    return;
+  }
   if (e.target.closest('[data-add]') && isHost()) send({ t: 'addBot' });
 });
 el.settings.addEventListener('click', e => {
@@ -575,6 +583,10 @@ function onEvent(m) {
       break;
     case 'left':
       addSys(`${esc(m.name)} 나감`);
+      break;
+    case 'host':
+      addSys(`${esc(m.from)} → ${esc(m.name)} 방장 넘김`);
+      if (m.to === me) toast('방장이 됐어요. 설정을 바꾸고 시작할 수 있어요.');
       break;
   }
 }
