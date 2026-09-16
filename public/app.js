@@ -273,9 +273,29 @@ el.roomList.addEventListener('click', e => {
 });
 
 /* ───────────── 상태 ───────────── */
+/* 판 수 세기 — 방장 화면에서만. 사람마다 보내면 한 판이 인원수만큼 세어진다. */
+let gameAt = 0;
+function countGame(s, prev) {
+  if (!window.norara || !s.players || s.hostId !== me) return;
+  const humans = s.players.filter(p => !p.bot).length;
+  if (s.phase === 'playing' && (!prev || prev.phase !== 'playing')) {
+    gameAt = Date.now();
+    norara.ev('start', { n: humans });
+  }
+}
+function countEnd() {
+  if (!window.norara || !gameAt || !S || S.hostId !== me) return;
+  norara.ev('end', {
+    n: S.players.filter(p => !p.bot).length,
+    sec: Math.round((Date.now() - gameAt) / 1000)
+  });
+  gameAt = 0;
+}
+
 function onState(s) {
   const prev = S;
   S = s;
+  countGame(s, prev);
   clockOffset = s.now - Date.now();
   if (s.phase === 'lobby') { renderRoom(); show('scRoom'); }
   else { renderGame(prev); show('scGame'); }
@@ -575,6 +595,7 @@ function onEvent(m) {
     }
 
     case 'end':
+      countEnd();
       showResult(m.ranking);
       break;
 
