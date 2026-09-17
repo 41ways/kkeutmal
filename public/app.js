@@ -65,6 +65,25 @@ function show(which) {
   for (const k of ['scTitle', 'scMain', 'scRoom', 'scGame']) el[k].hidden = k !== which;
 }
 
+/* ───────────── 테마 ───────────── */
+/* 고른 적이 없으면 기기 설정을 따른다. 첫 페인트 전 처리는 index.html 의 머리글 스크립트가 한다 */
+function setTheme(t) {
+  document.documentElement.dataset.theme = t;
+  store.set('kmTheme', t);
+  for (const b of document.querySelectorAll('[data-theme-btn]')) {
+    b.textContent = t === 'dark' ? '☀️' : '🌙';
+    b.title = t === 'dark' ? '밝게 보기' : '어둡게 보기';
+  }
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.content = t === 'dark' ? '#17130f' : '#fbf8f1';
+}
+document.addEventListener('click', e => {
+  if (!e.target.closest('[data-theme-btn]')) return;
+  setTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark');
+});
+setTheme(document.documentElement.dataset.theme
+  || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
+
 /* ───────────── 소리 (기본은 끔) ───────────── */
 let soundOn = store.get('kmSound') === '1';
 let actx = null;

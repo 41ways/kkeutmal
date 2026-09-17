@@ -5,6 +5,15 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>끝말잇기</title>
 <meta name="description" content="표준국어대사전 21만 낱말로 하는 온라인 끝말잇기. 방을 만들어 친구와, 혹은 봇과.">
+<meta name="theme-color" content="#fbf8f1">
+<script>
+  // 첫 페인트 전에 테마를 정해서 화면이 번쩍이지 않게 한다
+  try {
+    var t = localStorage.getItem('kmTheme');
+    if (!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    document.documentElement.dataset.theme = t;
+  } catch (e) {}
+</script>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect x='4' y='4' width='56' height='56' fill='%23fbf8f1' stroke='%23d0543a' stroke-width='5'/><text x='32' y='46' font-size='38' text-anchor='middle' font-family='serif' font-weight='700' fill='%232b2622'>끝</text></svg>">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -15,6 +24,7 @@
 
 <!-- ───────────── 시작 화면 ───────────── -->
 <section id="scTitle" class="screen title-screen">
+  <div class="corner"><button class="btn ghost small icon" data-theme-btn type="button" aria-label="테마 바꾸기"></button></div>
   <div class="title-wrap">
     <h1 class="logo big" aria-label="끝말잇기"><span>끝</span><span>말</span><span>잇</span><span>기</span></h1>
     <p class="title-sub">앞 낱말의 끝 글자를 이어 가는 말놀이</p>
@@ -33,6 +43,7 @@
 <!-- ───────────── 첫 화면 (이름 · 방 목록) ───────────── -->
 <section id="scMain" class="screen" hidden>
   <button id="btnHome" class="btn ghost small home">← 처음으로</button>
+  <div class="corner"><button class="btn ghost small icon" data-theme-btn type="button" aria-label="테마 바꾸기"></button></div>
   <header class="brand">
     <h1 class="logo" aria-label="끝말잇기"><span>끝</span><span>말</span><span>잇</span><span>기</span></h1>
     <p class="sub"><b id="wordCount">32만</b> 낱말로 잇는 온라인 끝말잇기</p>
@@ -115,6 +126,7 @@
     <button id="btnLeave" class="btn ghost small">← 나가기</button>
     <h2 id="roomTitle" class="room-title"></h2>
     <button id="btnInvite" class="code-chip" title="초대 링크 복사"><span>코드</span><b id="roomCode"></b></button>
+    <button class="btn ghost small icon" data-theme-btn type="button" aria-label="테마 바꾸기"></button>
   </div>
 
   <div class="room-grid">
@@ -167,6 +179,7 @@
       <span id="mission" class="mission" hidden></span>
       <button id="btnStop" class="btn ghost small" hidden>판 접기</button>
       <button id="btnSound" class="btn ghost small icon" title="소리"></button>
+      <button class="btn ghost small icon" data-theme-btn type="button" aria-label="테마 바꾸기"></button>
     </div>
   </div>
 
