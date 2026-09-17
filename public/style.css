@@ -525,6 +525,18 @@ input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-so
 .home { position: absolute; top: 16px; left: 14px; }
 /* 화면 오른쪽 위 구석 — 테마 단추 자리 */
 .corner { position: absolute; top: 16px; right: 14px; z-index: 2; }
+
+/* 테마 단추 — 구석에 있어서 속이 비면 눈에 안 띈다. 원고지 칸처럼 테를 두르고 채운다 */
+.btn.ghost[data-theme-btn] {
+  flex: none;                   /* 좁은 줄에서 눌려 찌그러지지 않게 */
+  width: 36px; height: 36px; padding: 0;
+  font-size: 18px; line-height: 1;
+  background: var(--sheet); color: var(--ink);
+  border: 1.5px solid var(--line); border-radius: 8px;
+  box-shadow: 0 2px 0 var(--line-soft);
+}
+.btn.ghost[data-theme-btn]:hover { background: var(--tint); border-color: var(--line-hi); }
+.btn.ghost[data-theme-btn]:active { transform: translateY(1px); box-shadow: 0 1px 0 var(--line-soft); }
 @media (prefers-reduced-motion: reduce) { .demo-sheet .cell.in { animation: none; } }
 @media (max-width: 860px) {
   .home { position: static; margin: 0 0 -6px -4px; }
