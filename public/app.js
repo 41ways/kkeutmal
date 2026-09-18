@@ -13,7 +13,7 @@ const el = {
   roomTitle: $('#roomTitle'), roomCode: $('#roomCode'), btnInvite: $('#btnInvite'), btnLeave: $('#btnLeave'),
   slots: $('#slots'), settings: $('#settings'), lastResult: $('#lastResult'),
   btnStart: $('#btnStart'), waitHost: $('#waitHost'),
-  chatLobby: $('#chatLobby'), chatGame: $('#chatGame'),
+  chatLobby: $('#chatLobby'), chatGame: $('#chatGame'), chatBtn: $('#chatBtn'), chatN: $('#chatN'), chatPeek: $('#chatPeek'),
   roundWord: $('#roundWord'), roundNo: $('#roundNo'), mission: $('#mission'), btnStop: $('#btnStop'), btnSound: $('#btnSound'),
   roundFill: $('#roundFill'), roundSec: $('#roundSec'), turnFill: $('#turnFill'), turnSec: $('#turnSec'),
   board: $('#board'), sheet: $('#sheet'), prevSheet: $('#prevSheet'), by: $('#by'), def: $('#def'), attempt: $('#attempt'), stamp: $('#stamp'),
@@ -63,6 +63,7 @@ function toast(msg, ms = 2600) {
 
 function show(which) {
   for (const k of ['scTitle', 'scMain', 'scRoom', 'scGame']) el[k].hidden = k !== which;
+  chatLook();
 }
 
 /* ───────────── 테마 ───────────── */
@@ -689,8 +690,8 @@ function flashTitle() {
   clearInterval(titleT);
   let on = false;
   titleT = setInterval(() => {
-    if (!document.hidden) { clearInterval(titleT); document.title = '끝말잇기'; return; }
-    on = !on; document.title = on ? '▶ 내 차례!' : '끝말잇기';
+    if (!document.hidden) { clearInterval(titleT); chatTitle(); return; }
+    on = !on; if (on) document.title = '▶ 내 차례!'; else chatTitle();
   }, 700);
 }
 
@@ -754,9 +755,99 @@ function pushChat(html, cls, gameOnly) {
     ul.scrollTop = ul.scrollHeight;
   }
 }
-function addChat(name, text, mine) { pushChat(`<span class="who">${esc(name)}</span>${esc(text)}`, mine ? 'mine' : ''); }
+function addChat(name, text, mine) {
+  pushChat(`<span class="who">${esc(name)}</span>${esc(text)}`, mine ? 'mine' : '');
+  if (mine) return;
+  const box = chatBox();
+  if (box && !chatSeen(box)) { chatUnread++; chatBadge(); chatPeek(name, text); }
+  if (document.hidden || !document.hasFocus()) { chatAway++; chatTitle(); }
+}
 function addSys(html, kind, gameOnly) { pushChat(html, 'sys ' + (kind || ''), gameOnly); }
-function chatReset() { el.chatLobby.innerHTML = el.chatGame.innerHTML = ''; }
+/** 다른 방에 들어오면 전 방의 말과 안 읽은 수를 들고 가지 않는다 */
+function chatReset() {
+  el.chatLobby.innerHTML = el.chatGame.innerHTML = '';
+  chatUnread = 0; chatBadge(); chatPeekOff();
+  chatAway = 0; chatTitle();
+}
+
+/* 채팅 칸은 접히지 않고 늘 펼쳐져 있다. 그래도 폰에서는 판 아래로 밀려 화면 밖에 있기 일쑤고,
+   내 차례에 자판이 올라오면 입력칸 바로 밑의 칸도 가려진다. 그래서 칸이 안 보이는 동안 온 남의 말은
+   세 군데로 알린다 — 오른쪽 아래 채팅 단추의 빨간 숫자(늘 때마다 통 튄다), 말풍선(읽을 만큼 떠 있다 사라진다),
+   다른 탭·창에 가 있으면 탭 제목 앞의 (n). 단추는 안 읽은 말이 있을 때만 뜨고, 누르면 채팅 칸으로 내려간다.
+   칸이 화면에 들어오면 숫자는 저절로 지운다. 넓은 화면에서는 칸이 늘 보여서 단추가 뜰 일이 없다. */
+let chatUnread = 0, chatAway = 0, chatPeekT = 0;
+const chatTitle0 = document.title;
+
+/** 지금 화면의 채팅 칸 — 대기실이면 대기실 것, 게임이면 게임 것. 방 밖이면 없다 */
+function chatBox() {
+  const ul = [el.chatLobby, el.chatGame].find(u => u.offsetParent);
+  return ul ? ul.closest('.chat-box') : null;
+}
+
+/** 채팅 칸이 눈에 보이는지. 자판에 가린 몫까지 빼려고 visualViewport 로 잰다 */
+function chatSeen(box) {
+  if (!box) return false;
+  const r = box.getBoundingClientRect(), v = window.visualViewport;
+  const top = v ? v.offsetTop : 0, bottom = top + (v ? v.height : innerHeight);
+  return Math.min(r.bottom, bottom) - Math.max(r.top, top) >= Math.min(60, r.height / 2);
+}
+
+/** 칸이 화면에 들어왔으면(혹은 방을 나와 칸이 없으면) 숫자와 말풍선을 거둔다 */
+function chatLook() {
+  if (!chatUnread && el.chatPeek.hidden) return;
+  const box = chatBox();
+  if (box && !chatSeen(box)) return;
+  chatUnread = 0; chatBadge(); chatPeekOff();
+}
+addEventListener('scroll', chatLook, { passive: true, capture: true });
+addEventListener('resize', chatLook);
+if (window.visualViewport) visualViewport.addEventListener('resize', chatLook);
+
+/** 채팅 칸으로 내려간다 */
+function chatGo() {
+  const box = chatBox();
+  if (box) box.scrollIntoView({ block: 'nearest', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+  chatUnread = 0; chatBadge(); chatPeekOff();
+}
+el.chatBtn.onclick = chatGo;
+el.chatPeek.onclick = chatGo;
+
+function chatBadge() {
+  const n = el.chatN;
+  n.textContent = chatUnread > 99 ? '99+' : chatUnread;
+  el.chatBtn.hidden = !chatUnread;
+  el.chatBtn.setAttribute('aria-label', `채팅으로 — 안 읽은 말 ${chatUnread}개`);
+  if (!chatUnread) return;
+  n.classList.remove('pop'); void n.offsetWidth; n.classList.add('pop');
+}
+
+function chatPeek(name, text) {
+  const p = el.chatPeek;
+  p.innerHTML = `<b>${esc(name)}</b>${esc(text)}`;
+  p.classList.remove('bye'); p.hidden = false;
+  p.style.animation = 'none'; void p.offsetWidth; p.style.animation = '';
+  clearTimeout(chatPeekT);
+  chatPeekT = setTimeout(() => {
+    p.classList.add('bye');
+    chatPeekT = setTimeout(chatPeekOff, 260);
+  }, Math.min(6000, Math.max(3000, 1200 + 70 * text.length)));
+}
+
+function chatPeekOff() {
+  clearTimeout(chatPeekT);
+  el.chatPeek.hidden = true; el.chatPeek.classList.remove('bye');
+}
+
+/** 내 차례 깜빡임(flashTitle)도 꺼질 때는 이리로 돌아온다 */
+function chatTitle() {
+  document.title = (chatAway ? `(${chatAway > 99 ? '99+' : chatAway}) ` : '') + chatTitle0;
+}
+
+function chatBack() {
+  if (chatAway && !document.hidden && document.hasFocus()) { chatAway = 0; chatTitle(); }
+}
+document.addEventListener('visibilitychange', chatBack);
+addEventListener('focus', chatBack);
 
 el.dlgResult.addEventListener('close', () => {
   if (el.dlgResult.returnValue === 'again' && isHost() && S.phase === 'lobby') { send({ t: 'start' }); return; }

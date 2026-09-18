@@ -288,6 +288,44 @@ input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-so
 .chat-form { border-top: 1px solid var(--line-soft); padding: 8px; }
 .chat-form input { width: 100%; }
 
+/* 채팅 칸이 화면 밖에 있을 때 온 말 — 오른쪽 아래 단추의 빨간 숫자와 말풍선. 누르면 칸으로 내려간다 */
+.chat-btn {
+  position: fixed; right: 16px; bottom: calc(16px + env(safe-area-inset-bottom)); z-index: 45;
+  width: 48px; height: 48px; border-radius: 50%; padding: 0;
+  font-size: 20px; line-height: 1; cursor: pointer;
+  background: var(--sheet); color: var(--ink); border: 1.5px solid var(--line);
+  box-shadow: 0 2px 0 var(--line-soft), 0 10px 24px -10px var(--shade);
+}
+.chat-btn:hover { background: var(--tint); border-color: var(--line-hi); }
+.chat-n {
+  position: absolute; top: -3px; right: -3px;
+  min-width: 18px; height: 18px; border-radius: 999px; padding: 0 5px;
+  font: 800 11px/18px var(--sans);
+  background: var(--bad); color: var(--on-ink);
+}
+.chat-n.pop { animation: chatPop .5s cubic-bezier(.3, 1.7, .5, 1); }
+@keyframes chatPop { from { transform: scale(.3); } }
+.chat-peek {
+  position: fixed; right: 74px; bottom: calc(21px + env(safe-area-inset-bottom)); z-index: 45;
+  max-width: min(260px, calc(100vw - 96px));
+  padding: 8px 12px; border-radius: 13px 13px 4px 13px;
+  background: var(--card); color: var(--ink); border: 1.5px solid var(--line-soft);
+  box-shadow: 0 12px 26px -12px var(--shade);
+  font-size: 13px; line-height: 1.45; cursor: pointer; word-break: break-word;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden;
+  animation: chatPeekIn .2s ease-out; transition: opacity .25s, transform .25s;
+}
+.chat-peek b { color: var(--ink2); font-weight: 700; margin-right: 6px; }
+.chat-peek.bye { opacity: 0; transform: translateX(6px); }
+@keyframes chatPeekIn { from { opacity: 0; transform: translateX(8px); } }
+/* 폰에서는 아래에 두면 입력칸 위를 덮고, 자판이 올라오면 같이 가려진다. 화면 위쪽에 띄운다 */
+@media (max-width: 560px) {
+  .chat-peek { top: calc(10px + env(safe-area-inset-top)); bottom: auto; left: 12px; right: 12px; max-width: none; border-radius: 13px; animation-name: chatPeekDown; }
+  .chat-peek.bye { transform: translateY(-6px); }
+}
+@keyframes chatPeekDown { from { opacity: 0; transform: translateY(-8px); } }
+@media (prefers-reduced-motion: reduce) { .chat-peek, .chat-n.pop { animation: none; transition: none; } }
+
 /* ── 게임 ── */
 #scGame { padding-top: 14px; }
 .gbar { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }

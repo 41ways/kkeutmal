@@ -238,6 +238,10 @@
 
 <div id="toast" class="toast" hidden></div>
 
+<!-- 채팅 칸이 화면 밖에 있을 때만 뜬다 — 안 읽은 말 수와, 방금 온 말 한 줄. 누르면 채팅 칸으로 내려간다 -->
+<button id="chatBtn" class="chat-btn" type="button" hidden aria-label="채팅으로">💬<span class="chat-n" id="chatN"></span></button>
+<div id="chatPeek" class="chat-peek" hidden role="status" aria-live="polite"></div>
+
 <script src="app.js"></script>
 
 <!-- 방문 통계와 오류 수집 — 허브와 같은 곳으로 모인다.
