@@ -141,7 +141,7 @@ a { color: var(--accent); }
 .btn.ghost:hover { background: var(--paper2); color: var(--ink); }
 .btn.small { padding: 5px 10px; font-size: 13px; }
 .btn.big { padding: 14px 40px; font-size: 18px; }
-.btn.icon { width: 34px; padding: 5px 0; }
+.btn.icon { flex: none; width: 34px; padding: 5px 0; }   /* 좁은 툴바에서 눌려 찌그러지지 않게 — 소리·테마 단추 다 해당 */
 .btn:disabled { opacity: .45; cursor: default; transform: none; }
 .btn small { font-weight: 400; color: var(--ink2); margin-left: 4px; }
 .btn.primary small { color: #ffe3da; }
