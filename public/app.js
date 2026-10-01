@@ -9,7 +9,8 @@ const el = {
   inName: $('#inName'), inCode: $('#inCode'), joinForm: $('#joinForm'),
   btnQuick: $('#btnQuick'), btnCreate: $('#btnCreate'), btnSolo: $('#btnSolo'),
   roomList: $('#roomList'), roomEmpty: $('#roomEmpty'), online: $('#online'),
-  dlgCreate: $('#dlgCreate'), createForm: $('#createForm'), inTitle: $('#inTitle'), inPriv: $('#inPriv'),
+  dlgCreate: $('#dlgCreate'), createForm: $('#createForm'), inTitle: $('#inTitle'), inPriv: $('#inPriv'), inSpec: $('#inSpec'),
+  specRoom: $('#specRoom'), specGame: $('#specGame'), btnSpecLeave: $('#btnSpecLeave'),
   roomTitle: $('#roomTitle'), roomCode: $('#roomCode'), btnInvite: $('#btnInvite'), btnLeave: $('#btnLeave'),
   slots: $('#slots'), settings: $('#settings'), lastResult: $('#lastResult'),
   btnStart: $('#btnStart'), waitHost: $('#waitHost'),
@@ -196,6 +197,8 @@ const send = obj => { if (ws && ws.readyState === 1) ws.send(JSON.stringify(obj)
 /** 방에 있었으면 그 자리로, 아니면 방 목록으로 */
 function reconnect() {
   const sv = saved();
+  // 관전자는 이어 붙을 토큰이 없다 — 연결이 끊겼으면 목록으로 돌아간다
+  if (!sv && S) { goMain(); toast('연결이 끊겨서 방에서 나왔음'); return; }
   if (sv) connect(() => send({ t: 'resume', code: sv.code, token: sv.token }));
   else connect(() => send({ t: 'rooms' }));
 }
@@ -206,12 +209,14 @@ function onMessage(m) {
       wokeUp = false;
       if (m.code !== (S && S.code)) chatReset();
       me = m.you;
-      store.set('km', JSON.stringify({ code: m.code, token: m.token }), sessionStorage);
+      // 관전자는 토큰이 없다 — 새로고침하면 #코드 로 다시 들어온다
+      if (m.role === 'spec') store.del('km', sessionStorage);
+      else store.set('km', JSON.stringify({ code: m.code, token: m.token }), sessionStorage);
       history.replaceState(null, '', '#' + m.code);
       break;
     case 'state': onState(m); break;
     case 'ev': onEvent(m); break;
-    case 'chat': addChat(m.name, m.text, m.from === me); break;
+    case 'chat': addChat(m.spec ? `${m.name} (관전)` : m.name, m.text, m.from === me); break;
     case 'rooms': renderRooms(m); break;
     case 'err':
       toast(m.fatal && wokeUp ? '오래 비워 둔 사이 방이 정리됐음. 새로 들어가 주세요.' : m.msg);
@@ -261,7 +266,7 @@ el.dlgCreate.querySelector('[data-name="cMode"]').addEventListener('click', e =>
 el.dlgCreate.addEventListener('close', () => {
   if (el.dlgCreate.returnValue !== 'ok') return;
   const n = needName(); if (!n) return;
-  connect(() => send({ t: 'create', name: n, title: el.inTitle.value.trim(), mode: createMode, priv: el.inPriv.checked }));
+  connect(() => send({ t: 'create', name: n, title: el.inTitle.value.trim(), mode: createMode, priv: el.inPriv.checked, spec: el.inSpec.checked }));
 });
 el.joinForm.onsubmit = e => {
   e.preventDefault();
@@ -271,20 +276,38 @@ el.joinForm.onsubmit = e => {
   connect(() => send({ t: 'join', code, name: n }));
 };
 
+/** 이 방에 지금 들어갈 수 있나 — 비공개는 목록에서 못 들어온다(코드나 초대 링크로만). 시작했거나 가득 찬 방은 관전을 허용할 때만. */
+function roomJoinable(r) {
+  if (r.priv) return false;
+  return (r.phase === 'lobby' && r.n < r.max) || !!r.spec;
+}
+function roomState(r) {
+  const full = r.n >= r.max;
+  if (r.phase === 'playing') return !r.spec ? '게임 중' : full ? '게임 중 · 관전만' : '게임 중 · 다음 판부터 참여';
+  if (full) return r.spec ? '가득 참 · 관전' : '가득 참';
+  return '기다리는 중';
+}
 function renderRooms(m) {
+  const open = m.list.filter(roomJoinable).length;
   el.online.textContent = `${m.online}명 접속 중`;
-  el.titleOnline.textContent = `지금 ${m.online}명 접속 · 열린 방 ${m.list.length}개`;
-  el.roomEmpty.hidden = m.list.length > 0;
-  el.roomList.innerHTML = m.list.map(r => `
-    <li data-code="${r.code}" class="${r.phase === 'playing' ? 'playing' : ''}">
+  el.titleOnline.textContent = `지금 ${m.online}명 접속 · 열린 방 ${open}개`;
+  el.roomEmpty.hidden = open > 0;
+  el.roomList.innerHTML = m.list.map(r => {
+    const can = roomJoinable(r);
+    const seatless = r.phase === 'playing' || r.n >= r.max;       // 정식 자리가 아니라 관전/대기로 들어가는 방
+    return `
+    <li ${can ? `data-code="${r.code}"` : ''} class="${[r.phase === 'playing' ? 'playing' : '', can ? '' : 'closed'].join(' ')}"${r.priv ? ' title="비공개 방 — 코드나 초대 링크로만 들어갈 수 있음"' : ''}>
       <span class="r-title">${esc(r.title)}</span>
       <span class="r-meta">
+        ${r.priv ? '<span class="pill priv">비공개</span>' : ''}
         <span class="pill">${MODE_KO[r.mode] || r.mode}</span>
         <span class="pill">${r.n}/${r.max}명</span>
-        <span class="pill ${r.phase === 'playing' ? 'live' : ''}">${r.phase === 'playing' ? '게임 중' : '기다리는 중'}</span>
+        <span class="pill ${r.phase === 'playing' ? 'live' : seatless && can ? 'spec' : ''}">${roomState(r)}</span>
+        ${r.watching ? `<span class="pill">관전 ${r.watching}</span>` : ''}
         <span>${esc(r.host)}</span>
       </span>
-    </li>`).join('');
+    </li>`;
+  }).join('');
 }
 el.roomList.addEventListener('click', e => {
   const li = e.target.closest('li[data-code]'); if (!li) return;
@@ -297,7 +320,7 @@ el.roomList.addEventListener('click', e => {
 let gameAt = 0;
 function countGame(s, prev) {
   // 지금 판 중인지 — 참가자도 알린다(판 수는 방장만 세지만, "지금 누가 있나"는 사람마다 센다)
-  if (window.norara && norara.live) norara.live(s.phase === 'playing');
+  if (window.norara && norara.live) norara.live(s.role !== 'spec' && s.phase === 'playing');   // 관전자는 판 중으로 안 센다
   if (!window.norara || !s.players || s.hostId !== me) return;
   const humans = s.players.filter(p => !p.bot).length;
   if (s.phase === 'playing' && (!prev || prev.phase !== 'playing')) {
@@ -321,12 +344,36 @@ function onState(s) {
   clockOffset = s.now - Date.now();
   if (s.phase === 'lobby') { renderRoom(); show('scRoom'); }
   else { renderGame(prev); show('scGame'); }
+  renderSpecs();
   syncEntry();
 }
 
+const isSpec = () => !!S && S.role === 'spec';
 const meP = () => S && S.players.find(p => p.id === me);
 const isHost = () => S && S.hostId === me;
 const nameById = id => { const p = S && S.players.find(x => x.id === id); return p ? p.name : '누군가'; };
+
+/** 관전 안내 — 관전자에게는 "관전 중" 띠, 플레이어에게는 지금 구경하는 사람들 */
+function renderSpecs() {
+  const spec = isSpec();
+  const names = (S && S.specs) || [];
+  const lobby = S && S.phase === 'lobby';
+  const watching = names.length ? `관전 ${names.length}명 — ${names.map(esc).join(', ')}` : '';
+  let room = '', game = '';
+  if (spec) {
+    room = '관전 중 — 지금은 대기 중이에요. 자리가 나면 다음 판부터 같이 해요.';
+    game = '관전 중 — 다음 판부터 자리가 나면 같이 해요.';
+  } else {
+    room = game = watching;
+  }
+  el.specRoom.innerHTML = room;
+  el.specRoom.hidden = !room || !lobby;
+  el.specRoom.classList.toggle('quiet', !spec);
+  el.specGame.querySelector('.t').innerHTML = game;
+  el.specGame.hidden = !game || lobby;
+  el.specGame.classList.toggle('quiet', !spec);
+  el.btnSpecLeave.hidden = !spec;
+}
 
 /* ───────────── 대기실 ───────────── */
 function renderRoom() {
@@ -364,6 +411,7 @@ function renderRoom() {
 
   el.btnStart.hidden = !host;
   el.waitHost.hidden = host;
+  el.waitHost.textContent = isSpec() ? '관전 중 — 방장이 시작하길 기다리는 중…' : '방장이 시작하길 기다리는 중…';
   el.btnStart.disabled = S.players.filter(p => p.bot || p.connected).length < 2;
   el.btnStart.textContent = el.btnStart.disabled ? '둘 이상이어야 시작' : '시작';
 
@@ -400,6 +448,7 @@ el.settings.addEventListener('change', e => {
 });
 el.btnStart.onclick = () => send({ t: 'start' });
 el.btnLeave.onclick = () => { send({ t: 'leave' }); goMain(); };
+el.btnSpecLeave.onclick = el.btnLeave.onclick;
 el.btnStop.onclick = () => { if (confirm('이 판을 여기서 접을까요? 지금 점수로 순위를 매김.')) send({ t: 'stop' }); };
 el.btnInvite.onclick = async () => {
   const url = `${location.origin}${location.pathname}#${S.code}`;
@@ -622,10 +671,10 @@ function onEvent(m) {
       break;
 
     case 'joined':
-      addSys(`${esc(m.name)} 들어옴${m.watching ? ' (다음 판부터)' : ''}`);
+      addSys(`${esc(m.name)} ${m.spec ? '관전 입장' : '들어옴'}`);
       break;
     case 'left':
-      addSys(`${esc(m.name)} 나감`);
+      addSys(`${esc(m.name)} ${m.spec ? '관전 나감' : '나감'}`);
       break;
     case 'host':
       addSys(`${esc(m.from)} → ${esc(m.name)} 방장 넘김`);
@@ -739,6 +788,7 @@ function syncEntry() {
   el.entryTag.textContent = myTurn ? '낱말' : '채팅';
   el.entry.placeholder = myTurn
     ? `${startsLabel(g.starts)} 시작하는 낱말${S.cfg.mode === 'kkt' ? ' (세 글자)' : ''}`
+    : isSpec() ? '관전 중 — 채팅은 할 수 있어요'
     : playing ? '내 차례가 아닐 때 친 말은 채팅' : S && S.phase === 'playing' ? '구경 중 — 채팅' : '채팅';
   if (myTurn && !el.scGame.hidden && document.activeElement !== el.entry && !el.dlgResult.open) el.entry.focus();
 }
@@ -857,7 +907,7 @@ el.btnGiveup.onclick = () => { send({ t: 'giveup' }); el.entry.focus(); };
 // 판 아무 데나 누르면 입력칸으로 (단추 · 채팅 칸은 빼고)
 el.scGame.addEventListener('click', e => {
   if (e.target.closest('button, input, a, .chat-box')) return;
-  if (!getSelection().toString()) el.entry.focus();
+  if (!isSpec() && !getSelection().toString()) el.entry.focus();
 });
 
 /* ───────────── 시작 화면 ───────────── */

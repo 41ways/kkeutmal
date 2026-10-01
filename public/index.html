@@ -113,6 +113,7 @@
       </div>
     </div>
     <label class="check"><input type="checkbox" id="inPriv"> 비공개 (코드로만 들어옴)</label>
+    <label class="check"><input type="checkbox" id="inSpec" checked> 관전 허용 (시작했거나 가득 차도 구경하며 기다림)</label>
     <div class="dlg-acts">
       <button value="cancel" class="btn ghost">취소</button>
       <button value="ok" class="btn primary">만들기</button>
@@ -131,6 +132,7 @@
 
   <div class="room-grid">
     <div class="room-main">
+      <div id="specRoom" class="spec-bar" hidden></div>
       <ul id="slots" class="slots"></ul>
 
       <div id="settings" class="panel settings">
@@ -150,6 +152,7 @@
             <label class="check" data-tip="방언 · 옛말 · 북한말 · 띄어 쓰는 말(치과기공사)은 안 받음"><input type="checkbox" data-cfg="strict"> 표준어만</label>
             <label class="check" data-tip="사전에 없는 말도 인정 — 포켓몬 · 롤 챔피언 · 신조어 · 운동 · 생활 낱말"><input type="checkbox" data-cfg="injeong"> 사전 외 낱말</label>
             <label class="check"><input type="checkbox" data-cfg="priv"> 비공개</label>
+            <label class="check" data-tip="시작했거나 가득 찬 방에도 구경하러 들어올 수 있음. 자리가 나면 다음 판부터 앉음"><input type="checkbox" data-cfg="spec"> 관전 허용</label>
           </div></div>
       </div>
 
@@ -181,6 +184,11 @@
       <button id="btnSound" class="btn ghost small icon" title="소리"></button>
       <button class="btn ghost small icon" data-theme-btn type="button" aria-label="테마 바꾸기"></button>
     </div>
+  </div>
+
+  <div id="specGame" class="spec-bar" hidden>
+    <span class="t"></span>
+    <button id="btnSpecLeave" class="btn small" type="button">나가기</button>
   </div>
 
   <div class="stage">

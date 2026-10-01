@@ -2,7 +2,7 @@
 /**
  * 판 로직 시험 — 서버 없이 game.js 를 가짜 소켓과 가상 시계로 돌린다.
  *   node test/game.js
- * 두음 법칙 · 낱말 판정 · 점수 · 시간 초과 · 봇끼리 끝까지 한 판 · 판 중에 나가기 · 미리 쳐 둔 낱말.
+ * 두음 법칙 · 낱말 판정 · 점수 · 시간 초과 · 봇끼리 끝까지 한 판 · 판 중에 나가기 · 미리 쳐 둔 낱말 · 관전.
  */
 const assert = require('assert');
 const fs = require('fs');
@@ -386,16 +386,237 @@ check('판 중에 차례인 사람이 나가면 다음 사람에게 넘어간다
   game.handle(rest[1], { t: 'leave' });
 });
 
-check('판 중에 들어온 사람은 구경하다가 다음 판부터', () => {
-  const x = sock(), y = sock();
-  game.handle(x, { t: 'create', name: 'x', bots: 1 });
+/* ── 관전 ── */
+const startedRoom = (opt = {}) => {
+  const x = sock();
+  game.handle(x, Object.assign({ t: 'create', name: 'x', bots: 1 }, opt));
   const c = last(x, m => m.t === 'welcome').code;
   game.handle(x, { t: 'start' });
+  return { x, c, r: game.rooms.get(c) };
+};
+const bye = (...ss) => ss.forEach(s => game.handle(s, { t: 'leave' }));
+const answer2 = r => game._t.candidates(game._t.pool('classic', true), r.g.starts, r.g.used)[0] || '사과';
+
+check('시작한 방에 들어오면 관전자 — role:spec, 판에는 영향 없고 행동은 무시', () => {
+  const { x, c, r } = startedRoom();
+  advance(3700);
+  const y = sock();
+  game.handle(y, { t: 'join', code: c, name: '구경' });
+  const w = last(y, m => m.t === 'welcome');
+  assert.strictEqual(w.role, 'spec');
+  assert.ok(!w.token, '관전자에게는 토큰이 없음');
+  const st = state(y);
+  assert.strictEqual(st.role, 'spec');
+  assert.deepStrictEqual(st.specs, ['구경']);
+  assert.strictEqual(state(x).role, 'player');
+  assert.deepStrictEqual(state(x).specs, ['구경'], '플레이어도 관전자를 안다');
+  assert.strictEqual(r.players.length, 2, '플레이어 수는 그대로');
+  assert.strictEqual(r.specs.length, 1);
+  assert.deepStrictEqual(r.g.order, [1, 2]);
+  assert.strictEqual(evs(x, 'joined').pop().spec, true);
+  // 행동은 전부 무시 — 낱말을 쳐도 채팅일 뿐 판에 안 들어간다
+  const used = r.g.used.size, chain = r.g.chain, host = r.hostId, phase = r.phase;
+  advance(500);
+  game.handle(y, { t: 'say', text: answer2(r) });
+  for (const t of ['start', 'stop', 'giveup', 'addBot']) game.handle(y, { t });
+  game.handle(y, { t: 'cfg', rounds: 6, spec: false });
+  game.handle(y, { t: 'kick', id: 2 });
+  game.handle(y, { t: 'host', id: 1 });
+  assert.strictEqual(r.g.used.size, used);
+  assert.strictEqual(r.g.chain, chain);
+  assert.strictEqual(r.hostId, host);
+  assert.strictEqual(r.phase, phase);
+  assert.strictEqual(r.cfg.spec, true);
+  assert.strictEqual(r.cfg.rounds, 5);
+  assert.strictEqual(r.players.length, 2);
+  // 채팅은 된다 — 이름으로 구분
+  const ch = last(x, m => m.t === 'chat');
+  assert.ok(ch && ch.spec === true && ch.name === '구경');
+  // 나가면 목록에서 빠진다
+  game.handle(y, { t: 'leave' });
+  assert.strictEqual(r.specs.length, 0);
+  assert.deepStrictEqual(state(x).specs, []);
+  bye(x);
+});
+
+check('소켓이 끊긴 관전자는 바로 빠진다 · 사람 플레이어가 다 나가면 관전 소켓도 닫힌다', () => {
+  const { x, c, r } = startedRoom();
+  const y = sock(), z = sock();
   game.handle(y, { t: 'join', code: c, name: 'y' });
+  game.handle(z, { t: 'join', code: c, name: 'z' });
+  assert.strictEqual(r.specs.length, 2);
+  game.disconnect(y);
+  assert.strictEqual(r.specs.length, 1);
+  assert.deepStrictEqual(state(x).specs, ['z']);
+  game.handle(x, { t: 'leave' });                        // 사람이 하나뿐이었다 — 방이 정리된다
+  assert.ok(!game.rooms.has(c));
+  assert.strictEqual(z.readyState, 3, '관전 소켓이 안 닫힘');
+  assert.strictEqual(last(z, m => m.t === 'err').fatal, true);
+});
+
+check('꽉 찬 대기실에 들어오면 관전자', () => {
+  const x = sock();
+  game.handle(x, { t: 'create', name: 'x', bots: 3 });
+  const c = last(x, m => m.t === 'welcome').code;
   const r = game.rooms.get(c);
-  assert.strictEqual(r.players.find(p => p.name === 'y').inGame, false);
-  assert.ok(!r.g.order.includes(r.players.find(p => p.name === 'y').id));
-  game.handle(x, { t: 'leave' }); game.handle(y, { t: 'leave' });
+  for (let i = r.players.length; i < game.MAX_PLAYERS; i++) game.handle(x, { t: 'addBot' });
+  assert.strictEqual(r.players.length, game.MAX_PLAYERS);
+  const y = sock();
+  game.handle(y, { t: 'join', code: c, name: '구경' });
+  assert.strictEqual(last(y, m => m.t === 'welcome').role, 'spec');
+  assert.strictEqual(state(y).role, 'spec');
+  assert.strictEqual(state(y).phase, 'lobby');
+  assert.strictEqual(r.players.length, game.MAX_PLAYERS);
+  assert.strictEqual(r.specs.length, 1);
+  // 자리가 비면(봇을 빼면) 대기실에서도 바로 앉는다
+  game.handle(x, { t: 'kick', id: r.players.find(p => p.bot).id });
+  assert.strictEqual(r.specs.length, 0);
+  assert.strictEqual(r.players.length, game.MAX_PLAYERS);
+  const w = last(y, m => m.t === 'welcome');
+  assert.strictEqual(w.role, 'player');
+  assert.ok(w.token);
+  assert.strictEqual(state(y).role, 'player');
+  bye(x, y);
+});
+
+check('관전 불허(spec:false) 방은 시작했거나 가득 차면 거절', () => {
+  const a1 = startedRoom({ spec: false });
+  assert.strictEqual(a1.r.cfg.spec, false);
+  const y = sock();
+  game.handle(y, { t: 'join', code: a1.c, name: 'y' });
+  assert.ok(/관전을 허용하지 않는/.test(last(y, m => m.t === 'err').msg));
+  assert.ok(!last(y, m => m.t === 'welcome'));
+  assert.strictEqual(a1.r.specs.length, 0);
+  assert.strictEqual(a1.r.players.length, 2);
+  bye(a1.x);
+
+  const x = sock();
+  game.handle(x, { t: 'create', name: 'x', bots: 3, spec: false });
+  const c = last(x, m => m.t === 'welcome').code;
+  const r = game.rooms.get(c);
+  for (let i = r.players.length; i < game.MAX_PLAYERS; i++) game.handle(x, { t: 'addBot' });
+  const z = sock();
+  game.handle(z, { t: 'join', code: c, name: 'z' });
+  const e = last(z, m => m.t === 'err');
+  assert.ok(e.msg.startsWith('방이 가득 찼어요.'));
+  assert.ok(!last(z, m => m.t === 'welcome'));
+  assert.strictEqual(r.specs.length, 0);
+  bye(x);
+});
+
+check('관전 허용은 create 와 대기실 cfg 로 정한다 (방장만, 판 중엔 거절)', () => {
+  const x = sock(), y = sock();
+  game.handle(x, { t: 'create', name: 'x' });
+  const c = last(x, m => m.t === 'welcome').code;
+  const r = game.rooms.get(c);
+  assert.strictEqual(r.cfg.spec, true);
+  assert.strictEqual(state(x).cfg.spec, true);
+  game.handle(y, { t: 'join', code: c, name: 'y' });
+  game.handle(y, { t: 'cfg', spec: false });              // 방장이 아님
+  assert.strictEqual(r.cfg.spec, true);
+  game.handle(x, { t: 'cfg', spec: 'no' });               // 잘못된 값
+  assert.strictEqual(r.cfg.spec, true);
+  game.handle(x, { t: 'cfg', spec: false });
+  assert.strictEqual(r.cfg.spec, false);
+  assert.strictEqual(state(y).cfg.spec, false);
+  game.handle(x, { t: 'cfg', spec: true });
+  game.handle(x, { t: 'start' });
+  game.handle(x, { t: 'cfg', spec: false });              // 판 중
+  assert.strictEqual(r.cfg.spec, true);
+  bye(x, y);
+});
+
+check('판이 끝나 대기실로 돌아오면 관전자가 빈 자리에 앉고 welcome 을 받는다', () => {
+  const { x, c, r } = startedRoom();
+  advance(3700);
+  const y = sock(), z = sock();
+  game.handle(y, { t: 'join', code: c, name: 'y' });
+  game.handle(z, { t: 'join', code: c, name: 'z' });
+  assert.strictEqual(r.specs.length, 2);
+  const before = y.inbox.length;
+  game.handle(x, { t: 'stop' });
+  assert.strictEqual(r.phase, 'lobby');
+  assert.strictEqual(r.specs.length, 0);
+  assert.deepStrictEqual(r.players.map(p => p.name), ['x', '말똥이', 'y', 'z'], '들어온 순서대로');
+  const w = y.inbox.slice(before).find(m => m.t === 'welcome');
+  assert.ok(w && w.role === 'player' && w.token && w.code === c);
+  const p = r.players.find(q => q.name === 'y');
+  assert.strictEqual(w.you, p.id);
+  assert.strictEqual(p.ws, y);
+  assert.strictEqual(p.inGame, false);
+  assert.strictEqual(state(y).role, 'player');
+  assert.deepStrictEqual(state(y).specs, []);
+  // 앉은 뒤에는 정식 플레이어 — 방장이 시작하면 같이 한다
+  game.handle(x, { t: 'start' });
+  assert.ok(r.g.order.includes(p.id));
+  game.handle(y, { t: 'resume', code: c, token: w.token });   // 토큰도 쓸 수 있다
+  assert.strictEqual(last(y, m => m.t === 'welcome').you, w.you);
+  bye(x, y, z);
+});
+
+check('자리가 모자라면 일부만 앉고 나머지는 계속 관전', () => {
+  const { x, c, r } = startedRoom();
+  for (let i = r.players.length; i < game.MAX_PLAYERS - 1; i++) r.players.push({ id: 100 + i, name: 'b' + i, bot: true, connected: true, inGame: true });
+  const y = sock(), z = sock();
+  game.handle(y, { t: 'join', code: c, name: 'y' });
+  game.handle(z, { t: 'join', code: c, name: 'z' });
+  game.handle(x, { t: 'stop' });
+  assert.strictEqual(r.players.length, game.MAX_PLAYERS);
+  assert.deepStrictEqual(r.specs.map(q => q.name), ['z']);
+  assert.strictEqual(state(z).role, 'spec');
+  assert.strictEqual(r.players.find(p => p.name === 'y').ws, y);
+  bye(x, y, z);
+});
+
+check('관전자는 방당 10명까지', () => {
+  const { x, c, r } = startedRoom();
+  const ss = [];
+  for (let i = 0; i < game.MAX_SPECS; i++) { const s = sock(); ss.push(s); game.handle(s, { t: 'join', code: c, name: 's' + i }); }
+  assert.strictEqual(r.specs.length, game.MAX_SPECS);
+  const extra = sock();
+  game.handle(extra, { t: 'join', code: c, name: '열한째' });
+  assert.strictEqual(last(extra, m => m.t === 'err').msg, '관전석이 가득 찼어요.');
+  assert.strictEqual(r.specs.length, game.MAX_SPECS);
+  bye(x, ...ss);
+});
+
+check('방 목록에 spec · watching 이 보이고, 비공개 방은 코드 없이 priv:true 로만 보인다', () => {
+  const w = sock();
+  const { x, c } = startedRoom();
+  const y = sock();
+  game.handle(y, { t: 'join', code: c, name: 'y' });
+  const px = sock();
+  game.handle(px, { t: 'create', name: '몰래', title: '비밀방', priv: true, spec: false });
+  const pc = last(px, m => m.t === 'welcome').code;
+  game.handle(w, { t: 'rooms' });
+  advance(400);
+  const raw = JSON.stringify(last(w, m => m.t === 'rooms'));
+  const list = JSON.parse(raw).list;
+  const e = list.find(q => q.code === c);
+  assert.ok(e, '공개 방이 안 보임');
+  assert.strictEqual(e.spec, true);
+  assert.strictEqual(e.watching, 1);
+  assert.strictEqual(e.phase, 'playing');
+  assert.strictEqual(e.n, 2);
+  assert.ok(!e.priv);
+  const pe = list.find(q => q.title === '비밀방');
+  assert.ok(pe, '비공개 방이 목록에 없음');
+  assert.strictEqual(pe.priv, true);
+  assert.strictEqual(pe.spec, false);
+  assert.strictEqual(pe.watching, 0);
+  assert.ok(!('code' in pe), '비공개 방 항목에 code 가 실림');
+  assert.ok(!raw.includes(pc), '비공개 방 코드가 목록에 샘');
+  // 정렬: 공개 · 대기 방이 맨 앞
+  const open = sock();
+  game.handle(open, { t: 'create', name: '열린', title: '대기 방' });
+  advance(400);
+  const l2 = last(w, m => m.t === 'rooms').list;
+  assert.ok(l2[0].phase === 'lobby' && !l2[0].priv, '맨 앞은 공개 · 대기 방');
+  const firstOther = l2.findIndex(q => q.priv || q.phase !== 'lobby');
+  assert.ok(l2.slice(firstOther).every(q => q.priv || q.phase !== 'lobby'), '공개 · 대기 방이 뒤에 섞임');
+  assert.ok(l2.some(q => q.title === '대기 방'));
+  assert.ok(l2.every(q => q.priv || q.code));
+  bye(x, y, px, open);
 });
 
 check('방장 넘기기 — 방장만, 사람에게만, 판 중에도', () => {

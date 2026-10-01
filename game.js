@@ -126,6 +126,7 @@ function contCount(room, c) {
 /* ─────────────────────────── 상수 ─────────────────────────── */
 
 const MAX_PLAYERS = 8;
+const MAX_SPECS = 10;          // 방 하나에 앉는 관전자 수
 const FAIL_PENALTY = 50;
 const GAP_MS = 450;            // 낱말이 받아들여지고 다음 차례가 열리기까지 (시계는 멈춘다)
 const FAIL_PAUSE = 2600;       // 시간 초과 뒤 다음 라운드까지
@@ -183,7 +184,7 @@ function makeCode() {
   return code;
 }
 
-function createRoom({ title, priv, mode }) {
+function createRoom({ title, priv, mode, spec }) {
   const room = {
     code: makeCode(),
     title: title || '끝말잇기 한 판',
@@ -191,9 +192,11 @@ function createRoom({ title, priv, mode }) {
     phase: 'lobby',               // lobby | playing
     hostId: null,
     players: [],
+    specs: [],                    // 관전자 — players 와 따로. 턴 · 인원수 · 방장 · 통계에 섞이지 않는다 { id, name, ws }
     nextId: 1,
     cfg: { mode: MODE_KEYS.includes(mode) ? mode : 'classic', rounds: 5, roundTime: 60,
-           mission: false, manner: false, noForeign: false, strict: false, injeong: false, botDiff: 'normal' },
+           mission: false, manner: false, noForeign: false, strict: false, injeong: false, botDiff: 'normal',
+           spec: spec !== false },       // 관전 허용 — 시작한 방 · 가득 찬 방에도 관전자로 들어올 수 있다
     g: null,
     timers: { turn: null, step: null, bot: null },
     lastActive: Date.now(),
@@ -233,10 +236,20 @@ function removePlayer(room, id) {
   if (!room.players.some(p => !p.bot)) { closeRoom(room); return; }
   listChanged();
   if (room.phase === 'playing' && room.g) leftMidGame(room, gone.id);
+  if (rooms.has(room.code) && room.phase === 'lobby') seatSpecs(room);
 }
 
 function closeRoom(room) {
   clearAll(room);
+  // 사람 플레이어가 없는 방은 관전자만으로 살려 두지 않는다 — 관전 소켓도 함께 닫는다
+  for (const s of room.specs) {
+    send(s.ws, { t: 'err', msg: '방이 닫혔어요.', fatal: true });
+    if (s.ws) {
+      s.ws.roomCode = null; s.ws.specId = null;
+      try { s.ws.close(1000, 'room closed'); } catch (_) { /* 이미 닫힘 */ }
+    }
+  }
+  room.specs = [];
   rooms.delete(room.code);
   listChanged();
 }
@@ -253,10 +266,14 @@ function send(ws, obj) {
   }
 }
 
-function stateOf(room) {
+/** 사람마다 보이는 상태. 숨은 정보는 원래 없지만(미리 쳐 둔 낱말 g.pending 만 서버가 쥔다),
+ *  관전자도 반드시 이 길을 거치게 해서 나중에 숨길 값이 생겨도 새지 않게 한다. role: 'player' | 'spec' */
+function stateOf(room, role = 'player') {
   const g = room.g;
   return {
     t: 'state',
+    role,
+    specs: room.specs.map(s => s.name),
     code: room.code,
     title: room.title,
     priv: room.priv,
@@ -284,8 +301,21 @@ function broadcast(room, obj) {
   for (const p of room.players) {
     if (!p.bot && p.ws && p.ws.readyState === 1) { try { p.ws.send(text); } catch (_) {} }
   }
+  for (const s of room.specs) {
+    if (s.ws && s.ws.readyState === 1) { try { s.ws.send(text); } catch (_) {} }
+  }
 }
-const pushState = room => broadcast(room, stateOf(room));
+function pushState(room) {
+  const mine = JSON.stringify(stateOf(room, 'player'));
+  for (const p of room.players) {
+    if (!p.bot && p.ws && p.ws.readyState === 1) { try { p.ws.send(mine); } catch (_) {} }
+  }
+  if (!room.specs.length) return;
+  const theirs = JSON.stringify(stateOf(room, 'spec'));
+  for (const s of room.specs) {
+    if (s.ws && s.ws.readyState === 1) { try { s.ws.send(theirs); } catch (_) {} }
+  }
+}
 const ev = (room, obj) => broadcast(room, Object.assign({ t: 'ev' }, obj));
 
 /* 방 목록 — 대기실 화면을 보는 사람에게만, 여러 번 바뀌어도 한 번에 모아 보낸다 */
@@ -297,15 +327,20 @@ function listChanged() {
 function roomList() {
   const list = [];
   for (const r of rooms.values()) {
-    if (r.priv) continue;
-    list.push({
-      code: r.code, title: r.title, mode: r.cfg.mode, phase: r.phase,
+    const e = {
+      title: r.title, mode: r.cfg.mode, phase: r.phase,
       n: r.players.length, max: MAX_PLAYERS, host: (r.players.find(p => p.id === r.hostId) || {}).name || '',
-    });
+      spec: r.cfg.spec, watching: r.specs.length,
+    };
+    // 비공개 방도 목록에는 나온다. 다만 코드는 싣지 않는다 — 코드나 초대 링크를 아는 사람만 들어온다.
+    if (r.priv) e.priv = true; else e.code = r.code;
+    list.push(e);
   }
-  list.sort((a, b) => (a.phase === 'lobby' ? 0 : 1) - (b.phase === 'lobby' ? 0 : 1) || b.n - a.n);
+  // 공개 · 대기 방이 맨 앞, 그다음은 대기 중 먼저 · 붐비는 순
+  const first = e => (!e.priv && e.phase === 'lobby' ? 0 : 1);
+  list.sort((a, b) => first(a) - first(b) || (a.phase === 'lobby' ? 0 : 1) - (b.phase === 'lobby' ? 0 : 1) || b.n - a.n);
   let online = watchers.size;
-  for (const r of rooms.values()) online += r.players.filter(p => !p.bot && p.connected).length;
+  for (const r of rooms.values()) online += r.players.filter(p => !p.bot && p.connected).length + r.specs.length;
   return { t: 'rooms', list, online };
 }
 function pushList() {
@@ -528,6 +563,7 @@ function endGame(room) {
   room.g = null;
   for (const p of room.players) p.inGame = false;
   ev(room, { kind: 'end', ranking });
+  seatSpecs(room);                  // 다음 판부터 — 기다리던 관전자를 빈 자리에 앉힌다
   pushState(room);
   listChanged();
 }
@@ -601,8 +637,8 @@ function attach(room, p, ws) {
     g.turnLimit = 0;
   }
   p.ws = ws; p.connected = true;
-  ws.roomCode = room.code; ws.playerId = p.id;
-  send(ws, { t: 'welcome', you: p.id, token: p.token, code: room.code });
+  ws.roomCode = room.code; ws.playerId = p.id; ws.specId = null;
+  send(ws, { t: 'welcome', you: p.id, token: p.token, code: room.code, role: 'player' });
   pushState(room);
   listChanged();
 }
@@ -612,11 +648,38 @@ function botName(room) {
   return BOT_NAMES.find(n => !used.has(n)) || `봇 ${room.players.length + 1}`;
 }
 
+/** 대기실이고 자리가 있으면 정식 참가. 시작했거나 가득 찼으면 관전을 허용하는 방에서만 관전자로 들인다. */
 function joinRoom(ws, r, name) {
-  if (r.players.length >= MAX_PLAYERS) return send(ws, { t: 'err', msg: '방이 가득 찼어요.' });
-  const p = addPlayer(r, { name: clean(name, 10) || `손님 ${r.players.length + 1}` });
-  attach(r, p, ws);
-  ev(r, { kind: 'joined', by: p.id, name: p.name, watching: r.phase === 'playing' });
+  const full = r.players.length >= MAX_PLAYERS;
+  if (r.phase === 'lobby' && !full) {
+    const p = addPlayer(r, { name: clean(name, 10) || `손님 ${r.players.length + 1}` });
+    attach(r, p, ws);
+    ev(r, { kind: 'joined', by: p.id, name: p.name });
+    return;
+  }
+  if (!r.cfg.spec) {
+    return send(ws, { t: 'err', msg: (r.phase === 'playing' ? '이미 시작한 방이에요.' : '방이 가득 찼어요.') + ' 관전을 허용하지 않는 방이에요.' });
+  }
+  if (r.specs.length >= MAX_SPECS) return send(ws, { t: 'err', msg: '관전석이 가득 찼어요.' });
+  const s = { id: r.nextId++, name: clean(name, 10) || `관전 ${r.specs.length + 1}`, ws, lastChat: 0 };
+  r.specs.push(s);
+  watchers.delete(ws);
+  ws.roomCode = r.code; ws.playerId = null; ws.specId = s.id;
+  send(ws, { t: 'welcome', you: s.id, code: r.code, role: 'spec' });     // 토큰 없음 — 새로고침하면 초대 링크 흐름으로 다시 들어온다
+  pushState(r);
+  ev(r, { kind: 'joined', by: s.id, name: s.name, spec: true });
+  listChanged();
+}
+
+/** 대기실에 자리가 나면 관전자를 들어온 순서대로 앉힌다. 앉은 사람은 입장 응답(welcome)을 새로 받아 자리를 이어받는다. */
+function seatSpecs(room) {
+  while (room.phase === 'lobby' && room.specs.length && room.players.length < MAX_PLAYERS) {
+    const s = room.specs.shift();
+    if (!s.ws || s.ws.readyState !== 1) continue;
+    const p = addPlayer(room, { name: s.name });
+    attach(room, p, s.ws);                       // welcome(role:'player') + 상태
+    ev(room, { kind: 'joined', by: p.id, name: p.name });
+  }
 }
 
 function handle(ws, msg) {
@@ -628,7 +691,7 @@ function handle(ws, msg) {
     case 'create': {
       if (ws.roomCode) leaveRoom(ws);
       const name = clean(msg.name, 10) || '손님 1';
-      const r = createRoom({ title: clean(msg.title, 20) || `${name}의 방`, priv: msg.priv, mode: msg.mode });
+      const r = createRoom({ title: clean(msg.title, 20) || `${name}의 방`, priv: msg.priv, mode: msg.mode, spec: msg.spec });
       const p = addPlayer(r, { name });
       const bots = clamp(Number(msg.bots) | 0, 0, 3);
       for (let i = 0; i < bots; i++) addPlayer(r, { name: botName(r), bot: true });
@@ -655,6 +718,7 @@ function handle(ws, msg) {
     }
 
     case 'resume': {
+      if (ws.specId != null) leaveRoom(ws);
       const r = rooms.get(clean(msg.code, 8).toUpperCase());
       if (!r) return send(ws, { t: 'err', msg: '방이 사라졌어요.', fatal: true });
       const p = r.players.find(x => x.token === msg.token);
@@ -669,6 +733,7 @@ function handle(ws, msg) {
 
   const room = rooms.get(ws.roomCode);
   if (!room) return;
+  if (ws.specId != null) return handleSpec(ws, room, msg);
   const me = room.players.find(p => p.id === ws.playerId);
   if (!me) return;
   const isHost = room.hostId === me.id;
@@ -723,6 +788,7 @@ function handle(ws, msg) {
       if (typeof msg.noForeign === 'boolean') c.noForeign = msg.noForeign;
       if (typeof msg.strict === 'boolean') c.strict = msg.strict;
       if (typeof msg.injeong === 'boolean') c.injeong = msg.injeong;
+      if (typeof msg.spec === 'boolean') c.spec = msg.spec;
       if (typeof msg.priv === 'boolean') room.priv = msg.priv;
       if (typeof msg.title === 'string' && clean(msg.title, 20)) room.title = clean(msg.title, 20);
       pushState(room); listChanged();
@@ -774,10 +840,44 @@ function handle(ws, msg) {
   }
 }
 
+/** 관전자가 보낸 말. 채팅 · 이름 · 나가기만 받고 게임 행동(낱말 · 시작 · 설정 …)은 조용히 버린다.
+ *  room.lastActive 도 건드리지 않는다 — 관전자가 방을 붙들고 있지 않게. */
+function handleSpec(ws, room, msg) {
+  const s = room.specs.find(x => x.id === ws.specId);
+  if (!s) return;
+  switch (msg.t) {
+    case 'say': {
+      const text = clean(msg.text, 200);
+      if (!text) return;
+      const now = Date.now();
+      if (now - s.lastChat < 400) return;
+      s.lastChat = now;
+      broadcast(room, { t: 'chat', from: s.id, name: s.name, text, spec: true });
+      return;
+    }
+    case 'name':
+      s.name = clean(msg.name, 10) || s.name;
+      pushState(room);
+      return;
+    case 'leave':
+      leaveRoom(ws);
+      return;
+  }
+}
+
 function leaveRoom(ws) {
   const room = rooms.get(ws.roomCode);
   ws.roomCode = null;
   if (!room) return;
+  if (ws.specId != null) {
+    const i = room.specs.findIndex(x => x.id === ws.specId);
+    ws.specId = null;
+    if (i < 0) return;
+    const [gone] = room.specs.splice(i, 1);
+    ev(room, { kind: 'left', name: gone.name, spec: true });
+    pushState(room); listChanged();
+    return;
+  }
   const me = room.players.find(p => p.id === ws.playerId);
   if (!me) return;
   removePlayer(room, me.id);
@@ -790,6 +890,11 @@ function disconnect(ws, { keepSeat = false } = {}) {
   if (watchers.delete(ws)) listChanged();
   const room = rooms.get(ws.roomCode);
   if (!room) return;
+  if (ws.specId != null) {                  // 관전자는 유예 없이 바로 뺀다
+    const i = room.specs.findIndex(x => x.id === ws.specId && x.ws === ws);
+    if (i >= 0) { room.specs.splice(i, 1); pushState(room); listChanged(); }
+    return;
+  }
   const p = room.players.find(x => x.id === ws.playerId);
   if (!p || p.ws !== ws) return;
   p.connected = false; p.ws = null;
@@ -847,7 +952,7 @@ function selfCheck() {
 }
 
 module.exports = {
-  rooms, handle, disconnect, sweepRooms, selfCheck, loadDict, MAX_PLAYERS,
+  rooms, handle, disconnect, sweepRooms, selfCheck, loadDict, MAX_PLAYERS, MAX_SPECS,
   // 시험용
   _t: { dueum, startsFrom, scoreOf, check, hasNext, candidates, pool, get WORDS() { return WORDS; }, get FOREIGN() { return FOREIGN; }, get NONSTD() { return NONSTD; }, get INJEONG() { return INJEONG; } },
 };
